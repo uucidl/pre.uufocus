@@ -32,11 +32,20 @@ struct user32
 
     BOOL (WINAPI *DispatchMessageW)(MSG *lpMsg);
 
+    BOOL (WINAPI *GetClientRect)(
+        _In_  HWND   hWnd,
+        _Out_ LPRECT lpRect);
+
     BOOL (WINAPI *GetMessageW)(
         MSG *lpMsg,
         HWND  hWnd,
         UINT  wMsgFilterMin,
         UINT  wMsgFilterMax);
+
+    BOOL (WINAPI *InvalidateRect)(
+        _In_       HWND hWnd,
+        _In_ const RECT *lpRect,
+        _In_       BOOL bErase);
 
     VOID (WINAPI *PostQuitMessage)(
         _In_ int nExitCode);
@@ -48,6 +57,9 @@ struct user32
         int nCmdShow);
 
     BOOL (WINAPI *TranslateMessage)(MSG *lpMsg);
+
+    BOOL (WINAPI *UpdateWindow)(
+        _In_ HWND hWnd);
 };
 
 user32 LoadUser32(kernel32 const& kernel32);

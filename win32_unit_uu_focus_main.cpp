@@ -1,14 +1,20 @@
 // @os: win32
 
 #include "uu_focus_main.hpp"
+#include "uu_focus_effects.hpp"
+#include "uu_focus_platform.hpp"
 
 #include <sal.h>
 #include <stdint.h>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 
 #include "win32_kernel32.hpp"
 #include "win32_user32.hpp"
 
+#include <d2d1.h>
+#pragma comment(lib, "d2d1.lib")
 
 // Taskbar:
 // @url: https://msdn.microsoft.com/en-us/library/windows/desktop/dd378460(v=vs.85).aspx
@@ -26,6 +32,12 @@ static uint64_t global_qpc_origin;
 
 static uint64_t now_micros();
 
+static ID2D1Factory *global_d2d1factory;
+
+struct Platform {
+    HWND main_hwnd;
+} global_platform;
+
 extern "C" int WINAPI WinMain(
     _In_ HINSTANCE hI,
     _In_opt_ HINSTANCE hPI,
@@ -34,6 +46,7 @@ extern "C" int WINAPI WinMain(
 {
     auto const kernel32 = LoadKernel32();
     global_kernel32 = kernel32;
+
     /* set up performance counters */ {
         LARGE_INTEGER x;
         kernel32.QueryPerformanceFrequency(&x);
@@ -41,6 +54,24 @@ extern "C" int WINAPI WinMain(
         kernel32.QueryPerformanceCounter(&x);
         global_qpc_origin = x.QuadPart;
     }
+
+    /* d2d1 */ {
+        auto m = kernel32.LoadLibraryA("d2d1.dll");
+        if (!m) {
+            return 0x9f'00'36'6d; // "failed to load d2d1"
+        }
+        auto last_hresult = D2D1CreateFactory(
+            D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            __uuidof(ID2D1Factory),
+            /*D2D1_FACTORY_OPTIONS*/nullptr,
+            reinterpret_cast<void**>(&global_d2d1factory));
+        if (S_OK != last_hresult) return 1;
+    }
+
+    auto &d2d1factory = *global_d2d1factory;
+    FLOAT dpi_x;
+    FLOAT dpi_y;
+    d2d1factory.GetDesktopDpi(&dpi_x, &dpi_y);
 
     auto const user32 = LoadUser32(kernel32);
     global_user32 = user32;
@@ -73,18 +104,6 @@ extern "C" int WINAPI WinMain(
     }
     user32.ShowWindow(main_hwnd, nCmdShow);
 
-    /* d2d1 */ {
-        auto m = kernel32.LoadLibraryA("d2d1.dll");
-        if (!m) {
-            return 1; // failed to load d2d1
-        }
-    }
-
-    // init
-    global_uu_focus_main.input.command = {};
-    global_uu_focus_main.input.time_micros = now_micros();
-    uu_focus_main(&global_uu_focus_main);
-
     /* win32 message loop */ {
         MSG msg;
         while (user32.GetMessageW(&msg, HWND{0}, 0, 0)) {
@@ -105,6 +124,8 @@ static uint64_t now_micros()
     return y;
 }
 
+static void d2d1_render(HWND hwnd);
+
 static WIN32_WINDOW_PROC(main_window_proc)
 {
     auto &main = global_uu_focus_main;
@@ -113,22 +134,93 @@ static WIN32_WINDOW_PROC(main_window_proc)
     main.input.time_micros = now_micros();
 
     switch (uMsg) {
+        case WM_CREATE: {
+            // init
+            auto &main_state = global_uu_focus_main;
+            main_state.timer_effect = timer_make(&global_platform);
+            main_state.input.command = {};
+            main_state.input.time_micros = now_micros();
+
+            uu_focus_main(&main_state);
+        } break;
+
         case WM_LBUTTONDOWN: {
             main.input.command.type = Command_timer_start;
+            uu_focus_main(&main);
         } break;
 
         case WM_DESTROY: {
             main.input.command.type = Command_application_stop;
+            uu_focus_main(&main);
+            user32.PostQuitMessage(0);
         } break;
-    }
 
-    bool must_quit = main.input.command.type == Command_application_stop;
-    uu_focus_main(&main);
-    if (must_quit) {
-        user32.PostQuitMessage(0);
+        case WM_PAINT: {
+            d2d1_render(hWnd);
+        } break;
     }
     return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
+
+static void d2d1_render(HWND hwnd)
+{
+    static int count = 0;
+    ++count; // paint once
+
+    static ID2D1HwndRenderTarget* global_render_target;
+    static HWND global_hwnd;
+    static int global_client_width;
+    static int global_client_height;
+
+    auto& user32 = global_user32;
+    auto& d2d1factory = *global_d2d1factory;
+
+    RECT rc;
+    user32.GetClientRect(hwnd, &rc);
+    int width = rc.right - rc.left;
+    int height = rc.bottom - rc.top;
+
+    HRESULT hr = S_OK;
+
+    if (!global_render_target ||
+        hwnd != global_hwnd ||
+        !(width == global_client_width && height == global_client_height)) {
+
+        hr = d2d1factory.CreateHwndRenderTarget(
+            D2D1::RenderTargetProperties(),
+            D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(width, height)),
+            &global_render_target);
+        global_hwnd = hwnd;
+        global_client_width = width;
+        global_client_height = height;
+    }
+
+    if (S_OK != hr) return;
+    auto &rt = *global_render_target;
+    rt.BeginDraw();
+
+    auto &main = global_uu_focus_main;
+    if (timer_is_active(main.timer_effect)) {
+        rt.Clear(D2D1::ColorF(D2D1::ColorF::Green, 1.0f));
+    } else {
+        rt.Clear(D2D1::ColorF(D2D1::ColorF::Black, 1.0f));
+    }
+    hr = rt.EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET) {
+        rt.Release();
+        global_render_target = nullptr;
+    }
+}
+
+void platform_render(Platform* _platform)
+{
+    auto& platform = *_platform;
+    auto& user32 = global_user32;
+    auto hwnd = platform.main_hwnd;
+    user32.InvalidateRect(hwnd, nullptr, FALSE);
+    user32.UpdateWindow(hwnd);
+}
+
 
 #include "uu_focus_main.cpp"
 #include "uu_focus_effects.cpp"

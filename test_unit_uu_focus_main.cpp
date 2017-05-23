@@ -110,8 +110,12 @@ int main(int argc, char** argv)
         assert(count_range(timer.actions,
                      "timer update_and_render") == 0);
 
-        program.input.time_micros += 1'000'000;
+        program.input.time_micros += 500'000;
         uu_focus_main(&program);
+
+        program.input.time_micros += 500'000;
+        uu_focus_main(&program);
+
         assert(count_range(timer.actions,
                      "timer update_and_render") == 1);
         assert(timer.actions.size() == 3);

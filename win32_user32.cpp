@@ -19,11 +19,14 @@ user32 LoadUser32(kernel32 const& kernel32)
         E(CreateWindowExW);
         E(DefWindowProcW);
         E(DispatchMessageW);
+        E(GetClientRect);
         E(GetMessageW);
+        E(InvalidateRect);
         E(PostQuitMessage);
         E(RegisterClassExW);
         E(ShowWindow);
         E(TranslateMessage);
+        E(UpdateWindow);
 #undef E
     }
     return result;
