@@ -2,6 +2,7 @@
 
 #include "uu_focus_main.hpp"
 #include "uu_focus_effects.hpp"
+#include "uu_focus_effects_types.hpp"
 #include "uu_focus_platform.hpp"
 
 #include <sal.h>
@@ -133,9 +134,15 @@ static WIN32_WINDOW_PROC(main_window_proc)
     main.input.command = {};
     main.input.time_micros = now_micros();
 
+    if (main.timer_effect) {
+        main.timer_effect->now_micros = now_micros();
+    }
+
     switch (uMsg) {
         case WM_CREATE: {
             // init
+            user32.SetTimer(hWnd, /*nIDEvent*/1, 1'000, NULL);
+
             auto &main_state = global_uu_focus_main;
             main_state.timer_effect = timer_make(&global_platform);
             main_state.input.command = {};
@@ -144,19 +151,23 @@ static WIN32_WINDOW_PROC(main_window_proc)
             uu_focus_main(&main_state);
         } break;
 
-        case WM_LBUTTONDOWN: {
-            main.input.command.type = Command_timer_start;
-            uu_focus_main(&main);
-        } break;
-
         case WM_DESTROY: {
             main.input.command.type = Command_application_stop;
             uu_focus_main(&main);
             user32.PostQuitMessage(0);
         } break;
 
+        case WM_LBUTTONDOWN: {
+            main.input.command.type = Command_timer_start;
+            uu_focus_main(&main);
+        } break;
+
         case WM_PAINT: {
             d2d1_render(hWnd);
+        } break;
+
+        case WM_TIMER: {
+            uu_focus_main(&main);
         } break;
     }
     return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam);

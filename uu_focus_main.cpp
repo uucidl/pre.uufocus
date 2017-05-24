@@ -40,30 +40,31 @@ void uu_focus_main(UUFocusMainCoroutine* _program)
             timer_start(timer);
             audio_start(audio);
 
-            set(&program, 20); case 20: {
+            set(&program, 20); case 20:
+            while (timer_is_active(timer)) {
                 auto const command = pop_command(&program);
                 auto timeout = step_elapsed_micros >= 1e6;
-                if (timer_is_active(timer)) {
-                    if (command.type) {
-                        if (command.type == Command_timer_stop) {
-                            audio_stop(audio);
-                            timer_stop(timer);
-                            jump(&program, 0); /* reset */
-                        } else if (command.type == Command_timer_start) {
-                            timer_reset(timer);
-                            timer_update_and_render(timer);
-                        }
-                    } else if(timeout) {
-                        timer_update_and_render(timer);
-                        // reset and wait:
-                        set(&program, 20);
-                    }
-                    goto yield;
+                if (!timeout && !command.type) {
+                    goto yield; // wait
                 }
 
-                timer_celebrate(timer);
+                if (command.type == Command_timer_stop) {
+                    audio_stop(audio);
+                    timer_stop(timer);
+                    timer_update_and_render(timer);
+                    jump(&program, 0); /* reset */
+                    goto yield;
+                } else if(command.type == Command_timer_start) {
+                    timer_reset(timer);
+                }
+                if (timeout) {
+                    set(&program, 20); // reset timeout
+                }
                 timer_update_and_render(timer);
+                goto yield;
             }
+            timer_celebrate(timer);
+            timer_update_and_render(timer);
         }
 
         case 200:

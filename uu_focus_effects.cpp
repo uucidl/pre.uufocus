@@ -1,14 +1,10 @@
 #include "uu_focus_effects.hpp"
+#include "uu_focus_effects_types.hpp"
+
 #include "uu_focus_platform.hpp"
 
 void audio_start(AudioEffect*) {}
 void audio_stop(AudioEffect*) {}
-
-struct TimerEffect
-{
-    int on_count;
-    Platform* platform;
-};
 
 TimerEffect* timer_make(Platform* platform)
 {
@@ -23,6 +19,7 @@ void timer_start(TimerEffect* _timer)
 {
     auto& timer = *_timer;
     ++timer.on_count;
+    timer_reset(&timer);
     timer_update_and_render(&timer);
 }
 
@@ -36,7 +33,7 @@ void timer_stop(TimerEffect* _timer)
 bool timer_is_active(TimerEffect* _timer)
 {
     auto& timer = *_timer;
-    return timer.on_count > 0;
+    return timer.on_count > 0 && timer.now_micros < timer.end_micros;
 }
 
 void timer_update_and_render(TimerEffect* _timer)
@@ -48,11 +45,13 @@ void timer_update_and_render(TimerEffect* _timer)
 void timer_reset(TimerEffect* _timer)
 {
     auto& timer = *_timer;
+    timer.end_micros = timer.now_micros + 5*1'000'000;
     timer_update_and_render(&timer);
 }
 
 void timer_celebrate(TimerEffect* _timer)
 {
     auto& timer = *_timer;
+    timer.on_count = 0;
     timer_update_and_render(&timer);
 }

@@ -56,6 +56,12 @@ struct user32
         HWND hWnd,
         int nCmdShow);
 
+    UINT_PTR (WINAPI *SetTimer)(
+        _In_opt_ HWND      hWnd,
+        _In_     UINT_PTR  nIDEvent,
+        _In_     UINT      uElapse,
+        _In_opt_ TIMERPROC lpTimerFunc);
+
     BOOL (WINAPI *TranslateMessage)(MSG *lpMsg);
 
     BOOL (WINAPI *UpdateWindow)(
