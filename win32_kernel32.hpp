@@ -11,6 +11,14 @@ struct kernel32
 
     HMODULE (WINAPI *LoadLibraryA)(_In_ LPCSTR lpFileName);
 
+    int (WINAPI *MultiByteToWideChar)(
+        _In_      UINT   CodePage,
+        _In_      DWORD  dwFlags,
+        _In_      LPCSTR lpMultiByteStr,
+        _In_      int    cbMultiByte,
+        _Out_opt_ LPWSTR lpWideCharStr,
+        _In_      int    cchWideChar);
+
     BOOL (WINAPI *QueryPerformanceCounter)(
         _Out_ LARGE_INTEGER *lpPerformanceCount);
 

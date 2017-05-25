@@ -47,6 +47,16 @@ struct user32
         _In_ const RECT *lpRect,
         _In_       BOOL bErase);
 
+    BOOL (WINAPI *KillTimer)(
+        _In_opt_ HWND     hWnd,
+        _In_     UINT_PTR uIDEvent);
+
+    int (WINAPI *MessageBoxW)(
+        _In_opt_ HWND    hWnd,
+        _In_opt_ LPCWSTR lpText,
+        _In_opt_ LPCWSTR lpCaption,
+        _In_     UINT    uType);
+
     VOID (WINAPI *PostQuitMessage)(
         _In_ int nExitCode);
 

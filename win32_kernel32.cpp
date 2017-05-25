@@ -8,6 +8,7 @@ kernel32 LoadKernel32()
     result.GetProcAddress = ::GetProcAddress;
     result.GetLastError = ::GetLastError;
     result.LoadLibraryA = ::LoadLibraryA;
+    result.MultiByteToWideChar = ::MultiByteToWideChar;
     result.QueryPerformanceCounter = ::QueryPerformanceCounter;
     result.QueryPerformanceFrequency = ::QueryPerformanceFrequency;
     return result;

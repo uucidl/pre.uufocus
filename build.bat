@@ -5,9 +5,9 @@
 
 REM check syntax with clang
 @set ClangWarnings=-Wall -Wextra -Wno-unused-parameter -Wmissing-prototypes
-clang -fsyntax-only win32_unit_uu_focus_main.cpp %ClangWarnings%
-clang -fsyntax-only uu_focus_main.cpp %ClangWarnings%
-clang -fsyntax-only test_unit_uu_focus_main.cpp %ClangWarnings%
+@clang -fsyntax-only win32_unit_uu_focus_main.cpp %ClangWarnings%
+@clang -fsyntax-only uu_focus_main.cpp %ClangWarnings%
+@clang -fsyntax-only test_unit_uu_focus_main.cpp %ClangWarnings%
 
 
 REM Build tests:
@@ -20,5 +20,6 @@ cl -nologo -EHsc -Od -Z7 -W3 test_unit_uu_focus_main.cpp -Fo%BuildObjDir%\ ^
 )
 
 REM Build program:
-cl -nologo -Od -Z7 -W3 win32_unit_uu_focus_main.cpp -Fo%BuildObjDir%\ -Fe%BuildDir%\uu_focus.exe
-
+cl -nologo -Od -Z7 -W3 win32_unit_uu_focus_main.cpp -Fo%BuildObjDir%\ -Fe%BuildDir%\uu_focus.exe ^
+   -link -incremental:no
+mt.exe -nologo -manifest %BuildDir%\uu_focus.exe.manifest -outputresource:%BuildDir%\uu_focus.exe;1

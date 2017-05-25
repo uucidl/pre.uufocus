@@ -1,14 +1,6 @@
 #include "win32_user32.hpp"
 
-template <typename FnP>
-void
-address_assign(
-    FnP *dest, HMODULE hModule, char const* lpProcName)
-{
-    auto const& kernel32 = global_kernel32;
-    *dest = reinterpret_cast<FnP>(
-        kernel32.GetProcAddress(hModule, lpProcName));
-}
+#include "win32_utils.ipp"
 
 user32 LoadUser32(kernel32 const& kernel32)
 {
@@ -22,6 +14,8 @@ user32 LoadUser32(kernel32 const& kernel32)
         E(GetClientRect);
         E(GetMessageW);
         E(InvalidateRect);
+        E(KillTimer);
+        E(MessageBoxW);
         E(PostQuitMessage);
         E(RegisterClassExW);
         E(SetTimer);

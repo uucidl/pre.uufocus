@@ -3,8 +3,14 @@
 
 
 struct UUFocusMainCoroutine;
+enum CoroutineState
+{
+    CoroutineState_Done,
+    CoroutineState_Waiting,
+    CoroutineState_ErrorRentry,
+};
 
-void uu_focus_main(UUFocusMainCoroutine* program);
+CoroutineState uu_focus_main(UUFocusMainCoroutine* program);
 
 
 #include <cstdint>
@@ -36,6 +42,7 @@ struct UUFocusMainCoroutine
     struct TimerEffect *timer_effect;
 
     // internal state:
+    int entry_count;
     int step;
     std::uint64_t step_micros;
 };

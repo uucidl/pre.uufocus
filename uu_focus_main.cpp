@@ -6,8 +6,28 @@ static CommandMsg pop_command(UUFocusMainCoroutine* _program);
 static void set(UUFocusMainCoroutine* _program, int step);
 static void jump(UUFocusMainCoroutine* _program, int step);
 
+namespace
+{
+struct CounterScope
+{
+    int *_counter;
+    CounterScope(int* _counter) : _counter(_counter)
+    {
+        auto& counter = *_counter;
+        ++counter;
+    }
+
+    ~CounterScope()
+    {
+        auto& counter = *_counter;
+        --counter;
+    }
+
+};
+} // unnamed namespace
+
 // NOTE(Nicolas): main logic of the application.
-void uu_focus_main(UUFocusMainCoroutine* _program)
+CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
 {
     auto& program = *_program;
 
@@ -23,9 +43,12 @@ void uu_focus_main(UUFocusMainCoroutine* _program)
             timer_stop(timer);
         }
         jump(&program, 200);
-        goto yield;
+        return CoroutineState_Done;
     }
 
+    if (program.entry_count > 0) return CoroutineState_ErrorRentry;
+
+    CounterScope entry_counter(&program.entry_count);
     switch(/* resume */ program.step) {
         case 0:
 
@@ -34,7 +57,7 @@ void uu_focus_main(UUFocusMainCoroutine* _program)
 
             set(&program, 10); case 10:
             if (pop_command(&program).type != Command_timer_start) {
-                goto yield;
+                return CoroutineState_Waiting;
             }
 
             timer_start(timer);
@@ -45,7 +68,7 @@ void uu_focus_main(UUFocusMainCoroutine* _program)
                 auto const command = pop_command(&program);
                 auto timeout = step_elapsed_micros >= 1e6;
                 if (!timeout && !command.type) {
-                    goto yield; // wait
+                    return CoroutineState_Waiting;
                 }
 
                 if (command.type == Command_timer_stop) {
@@ -53,27 +76,24 @@ void uu_focus_main(UUFocusMainCoroutine* _program)
                     timer_stop(timer);
                     timer_update_and_render(timer);
                     jump(&program, 0); /* reset */
-                    goto yield;
+                    return CoroutineState_Waiting;
                 } else if(command.type == Command_timer_start) {
                     timer_reset(timer);
-                }
-                if (timeout) {
+                    set(&program, 20); // reset timeout
+                } else if (timeout) {
                     set(&program, 20); // reset timeout
                 }
                 timer_update_and_render(timer);
-                goto yield;
+                return CoroutineState_Waiting;
             }
             timer_celebrate(timer);
             timer_update_and_render(timer);
         }
 
         case 200:
-        /* application end */
-        goto yield;
+        return CoroutineState_Done;
     }
-
-yield: /* return to caller */
-    return;
+    return CoroutineState_Done;
 }
 
 static CommandMsg pop_command(UUFocusMainCoroutine* _program)
