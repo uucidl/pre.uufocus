@@ -5,6 +5,7 @@
 kernel32 LoadKernel32()
 {
     kernel32 result = {};
+    result.CreateThread = ::CreateThread;
     result.GetProcAddress = ::GetProcAddress;
     result.GetLastError = ::GetLastError;
     result.LoadLibraryA = ::LoadLibraryA;

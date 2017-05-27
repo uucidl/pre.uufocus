@@ -7,6 +7,9 @@ struct AudioEffect;
 void audio_start(AudioEffect*);
 void audio_stop(AudioEffect*);
 
+// meant to be called by platform layer
+void audio_thread_render(AudioEffect*, float* stereo_frames, int frame_count);
+
 struct TimerEffect;
 TimerEffect* timer_make(Platform* platform);
 void timer_destroy(TimerEffect*);

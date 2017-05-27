@@ -20,6 +20,8 @@ cl -nologo -EHsc -Od -Z7 -W3 test_unit_uu_focus_main.cpp -Fo%BuildObjDir%\ ^
 )
 
 REM Build program:
-cl -nologo -Od -Z7 -W3 win32_unit_uu_focus_main.cpp -Fo%BuildObjDir%\ -Fe%BuildDir%\uu_focus.exe ^
-   -link -incremental:no
+cl -nologo -Od -Z7 -W3 win32_unit_uu_focus_main.cpp -Fo%BuildObjDir%\ -Fe%BuildDir%\uu_focus_dev.exe ^
+  -link -PDB:%BuildDir%\uu_focus.pdb
+
+copy %BuildDir%\uu_focus_dev.exe %BuildDir%\uu_focus.exe
 mt.exe -nologo -manifest %BuildDir%\uu_focus.exe.manifest -outputresource:%BuildDir%\uu_focus.exe;1

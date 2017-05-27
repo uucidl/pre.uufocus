@@ -87,6 +87,7 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
                 return CoroutineState_Waiting;
             }
             timer_celebrate(timer);
+            audio_stop(audio);
             timer_update_and_render(timer);
         }
 
@@ -115,3 +116,13 @@ static void jump(UUFocusMainCoroutine* _program, int step)
 {
     set(_program, step);
 }
+
+/*
+
+Project
+-------
+
+- TODO(nicolas): Win32 Notification aren't very obtrusive, I missed
+  one while working a cycle without sound on.
+
+*/
