@@ -210,6 +210,11 @@ static WIN32_WINDOW_PROC(main_window_proc)
             user32.SetTimer(hWnd, refresh_timer_id, timer_period_ms, NULL);
         } break;
 
+        case WM_RBUTTONDOWN: {
+            main.input.command.type = Command_timer_stop;
+            uu_focus_main(&main);
+        } break;
+
         case WM_PAINT: {
             d2d1_render(hWnd);
         } break;
@@ -225,6 +230,7 @@ static WIN32_WINDOW_PROC(main_window_proc)
 }
 
 static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt);
+static void welcome_render(ID2D1HwndRenderTarget* rt);
 
 static void d2d1_render(HWND hwnd)
 {
@@ -266,6 +272,7 @@ static void d2d1_render(HWND hwnd)
     auto &main = global_uu_focus_main;
     if (!timer_is_active(main.timer_effect)) {
         rt.Clear(D2D1::ColorF(D2D1::ColorF::Black, 1.0f));
+        welcome_render(&rt);
     } else /* timer is active */ {
         rt.Clear(D2D1::ColorF(D2D1::ColorF::Green, 1.0f));
         timer_render(*main.timer_effect, &rt);
@@ -285,6 +292,35 @@ static int digits_count(int32_t x)
     }
     if (!digits) digits = 1;
     return digits;
+}
+
+static char* string_push_n(char* dst_first,
+                           char* dst_last,
+                           char const* text,
+                           size_t text_n)
+{
+    char* dst = dst_first;
+    while (text_n && dst != dst_last) {
+        *dst = *text;
+        ++dst;
+        ++text;
+        --text_n;
+    }
+    return text_n == 0 ? dst : dst_first;
+}
+
+
+static char* string_push_zstring(char* dst_first,
+                                 char* const dst_last,
+                                 char const* zstring)
+{
+    auto dst = dst_first;
+    while(*zstring && dst != dst_last) {
+        *dst = *zstring;
+        ++dst;
+        ++zstring;
+    }
+    return *zstring ? dst_first : dst;
 }
 
 static char* string_push_i32(char* dst_first,
@@ -316,21 +352,18 @@ static char* string_push_i32(char* dst_first,
     return dst_first + n;
 }
 
-static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* _rt)
+static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, char* text_last)
 {
-    static ID2D1HwndRenderTarget *global_rt;
     static IDWriteTextFormat *global_text_format;
-    if (global_rt != _rt) {
-        auto &dwrite = *global_dwritefactory;
-        global_rt = _rt;
-        if (global_text_format) global_text_format->Release();
+    auto &dwrite = *global_dwritefactory;
+    if (!global_text_format) {
         auto hr = dwrite.CreateTextFormat(
             /* font name */ L"Calibri",
             nullptr,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            /* font size */ 24,
+            /* font size */ 34,
             /* locale */ L"",
             &global_text_format);
         // TODO(nicolas): hr ...
@@ -341,52 +374,69 @@ static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* _rt)
     auto &text_format = *global_text_format;
     auto size = rt.GetSize();
 
-    ID2D1SolidColorBrush* fg_brush;
-    rt.CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White, 1.0f), &fg_brush);
-
     text_format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     text_format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
-    int const timer_countdown_s = 1+int((timer.end_micros - now_micros())/1'000'000);
+    enum { MAX_TEXT_SIZE = 100 };
+    wchar_t render_text[MAX_TEXT_SIZE];
+    auto render_text_last = render_text +
+        MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            text_first,
+            int(text_last - text_first),
+            render_text,
+            MAX_TEXT_SIZE);
 
-    enum { COUNTDOWN_TEXT_SIZE = 10 };
-    char countdown_text[COUNTDOWN_TEXT_SIZE];
-    auto countdown_text_end = countdown_text + COUNTDOWN_TEXT_SIZE;
-    size_t countdown_text_size = 0;
+    ID2D1SolidColorBrush* fg_brush;
+    rt.CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White, 1.0f), &fg_brush);
+    rt.DrawTextW(
+        render_text,
+        UINT32(render_text_last - render_text),
+        &text_format,
+        D2D1::RectF(0, 0, size.width, size.height),
+        fg_brush);
+    fg_brush->Release();
+}
+
+static void welcome_render(ID2D1HwndRenderTarget* _rt)
+{
+    enum { MAX_TEXT_SIZE = 100 };
+    char text[MAX_TEXT_SIZE];
+    auto const text_e = text + MAX_TEXT_SIZE;
+    auto text_l = text;
+    text_l = string_push_zstring(
+        text_l, text_e, "Press LMB to start timer.");
+    centered_text_render(_rt, text, text_l);
+}
+
+static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* _rt)
+{
+    int const timer_countdown_s =
+        1+int((timer.end_micros - now_micros())/1'000'000);
+
+    enum { MAX_TEXT_SIZE = 100 };
+    char text[MAX_TEXT_SIZE];
+    auto text_end = text + MAX_TEXT_SIZE;
+    auto text_last = text;
     /* build countdown text */ {
         auto const x_s = timer_countdown_s;
-        auto const rf = countdown_text;
-        auto const rl = countdown_text_end;
-        auto rc = rf;
+        auto const rl = text_end;
+        auto rc = text_last;
 
         auto minutes = x_s / 60;
         auto seconds = x_s - minutes*60;
 
         rc = string_push_i32(rc, rl, minutes, 2);
-        if (rc != rl) {
-            *rc = ':';
-            ++rc;
-        }
+        rc = string_push_n(rc, rl, ":", 1);
         rc = string_push_i32(rc, rl, seconds, 2);
-        countdown_text_size = rc - rf;
+        text_last = rc;
     }
-    wchar_t countdown_render_text[COUNTDOWN_TEXT_SIZE];
-    auto countdown_render_text_last = countdown_render_text +
-        MultiByteToWideChar(
-            CP_UTF8,
-            0,
-            countdown_text,
-            int(countdown_text_size),
-            countdown_render_text,
-            COUNTDOWN_TEXT_SIZE);
+    text_last = string_push_zstring(
+        text_last, text_end,
+        "\npress RMB to stop, LMB to reset.");
 
-    rt.DrawTextW(
-        countdown_render_text,
-        UINT32(countdown_render_text_last - countdown_render_text),
-        global_text_format,
-        D2D1::RectF(0, 0, size.width, size.height),
-        fg_brush);
-    fg_brush->Release();
+    centered_text_render(_rt, text, text_last);
 }
 
 #include <cassert>
@@ -470,8 +520,6 @@ void platform_notify(Platform* _platform, UIText _text)
     }
 #endif
 }
-
-#include <cmath>
 
 static THREAD_PROC(audio_thread_main)
 {

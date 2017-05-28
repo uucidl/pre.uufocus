@@ -3,6 +3,7 @@
 
 #include "uu_focus_platform.hpp"
 
+#include <cmath>
 #include <random>
 
 static double global_audio_amp_target = 0.0;
@@ -51,7 +52,7 @@ static double white_noise_step()
     return d(g);
 }
 
-#if defined(UNUSED)
+#if UU_FOCUS_INTERNAL
 static void reference_tone_n(float* stereo_frames, int frame_count)
 {
     static const auto reference_hz = 1000;
@@ -126,11 +127,20 @@ void audio_thread_render(AudioEffect*, float* stereo_frames, int frame_count)
     if (fade_remaining_frames == 0 && amp_target == 0.0) {
         memset(stereo_frames, 0, frame_count * 2 * sizeof(float));
     } else {
+#if UU_FOCUS_INTERNAL
+        reference_tone_n(stereo_frames, frame_count);
+#else
+        auto pink_noise_amp = db_to_amp(-26);
         static PinkNoiseState pink = {};
         pink_noise_n(&pink, stereo_frames, frame_count);
-
         for (int i = 0; i < frame_count; ++i) {
-            auto y = amp * db_to_amp(-26);
+            float y = float(pink_noise_amp);
+            stereo_frames[2*i] *= y;
+            stereo_frames[2*i + 1] *= y;
+        }
+#endif
+        for (int i = 0; i < frame_count; ++i) {
+            auto y = amp;
             stereo_frames[2*i] *= float(y);
             stereo_frames[2*i + 1] *= float(y);
             if (fade_remaining_frames == 0) {
