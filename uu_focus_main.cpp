@@ -122,7 +122,21 @@ static void jump(UUFocusMainCoroutine* _program, int step)
 Project
 -------
 
-- TODO(nicolas): Win32 Notification aren't very obtrusive, I missed
-  one while working a cycle without sound on.
+- TODO(nicolas): application .ico for windows
+- TODO(nicolas): foreground icon should be correct
+
+UI, thoughts
+------------
+
+Goals:
+- Looks classy,
+- Good visibility 'timer running' vs 'timer stopped',
+- Sound volume can be muted/lowered,
+- Can't stop timer by accident
+- Clear notifications:
+    + Win32 Notification aren't very obtrusive, I missed
+      one while working a cycle without sound on.
+
+
 
 */

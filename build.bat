@@ -21,13 +21,13 @@ cl -nologo -EHsc -Od -Z7 -W3 test_unit_uu_focus_main.cpp -Fo%BuildObjDir%\ ^
 
 REM Build program:
 cl -DUU_FOCUS_INTERNAL=1 ^
--Fe%BuildDir%\uu_focus_dev.exe win32_unit_uu_focus_main.cpp ^
--nologo -Od -Z7 -W3 -Fo%BuildObjDir%\  ^
+  -Fe%BuildDir%\uu_focus_dev.exe win32_unit_uu_focus_main.cpp ^
+  -Od -EHsc -Z7 -W3 -Fo%BuildObjDir%\ -nologo ^
   -link -PDB:%BuildDir%\uu_focus_dev.pdb
 
 cl -DUU_FOCUS_INTERNAL=0 ^
--Fe%BuildDir%\uu_focus_release.exe win32_unit_uu_focus_main.cpp ^
--nologo -O2 -Z7 -W3 -Fo%BuildObjDir%\  ^
+  -Fe%BuildDir%\uu_focus_release.exe win32_unit_uu_focus_main.cpp ^
+  -O2 -EHsc -Z7 -W3 -Fo%BuildObjDir%\ -nologo ^
   -link -PDB:%BuildDir%\uu_focus_release.pdb
 
 copy %BuildDir%\uu_focus_release.exe %BuildDir%\uu_focus.exe

@@ -26,7 +26,7 @@
 #include "win32_user32.hpp"
 #include "win32_shell32.hpp"
 
-#include <d2d1.h>
+#include <D2d1.h>
 #pragma comment(lib, "d2d1.lib")
 
 #include <dwrite.h>
@@ -260,6 +260,7 @@ static void d2d1_render(HWND hwnd)
             D2D1::RenderTargetProperties(),
             D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(width, height)),
             &global_render_target);
+        if (hr != S_OK) return;
         global_hwnd = hwnd;
         global_client_width = width;
         global_client_height = height;
@@ -408,6 +409,39 @@ static void welcome_render(ID2D1HwndRenderTarget* _rt)
     text_l = string_push_zstring(
         text_l, text_e, "Press LMB to start timer.");
     centered_text_render(_rt, text, text_l);
+
+#if UU_FOCUS_INTERNAL
+    /* path geometry test */ {
+        auto &d2d1factory = *global_d2d1factory;
+        ID2D1PathGeometry* _path_geometry;
+        auto hr = d2d1factory.CreatePathGeometry(&_path_geometry);
+        if (hr != S_OK) return;
+
+        auto& pg = *_path_geometry;
+        ID2D1GeometrySink* _path_geometry_sink;
+        if (SUCCEEDED(pg.Open(&_path_geometry_sink))) {
+            auto &sink = *_path_geometry_sink;
+            sink.BeginFigure(D2D1::Point2F(0, 0),
+                             D2D1_FIGURE_BEGIN_HOLLOW);
+            sink.AddLine(D2D1::Point2F(100, 100));
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            sink.Close();
+
+            _path_geometry_sink->Release();
+            _path_geometry_sink = nullptr;
+        }
+
+        auto& rt = *_rt;
+        ID2D1SolidColorBrush* fg_brush;
+        rt.CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White, 1.0f), &fg_brush);
+        rt.DrawGeometry(_path_geometry, fg_brush);
+
+        fg_brush->Release();
+
+        _path_geometry->Release();
+        _path_geometry = nullptr;
+    }
+#endif
 }
 
 static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* _rt)
