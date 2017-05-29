@@ -255,7 +255,7 @@ static void d2d1_render(HWND hwnd)
     if (!global_render_target ||
         hwnd != global_hwnd ||
         !(width == global_client_width && height == global_client_height)) {
-
+        if (global_render_target) global_render_target->Release();
         hr = d2d1factory.CreateHwndRenderTarget(
             D2D1::RenderTargetProperties(),
             D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(width, height)),
