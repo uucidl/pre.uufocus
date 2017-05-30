@@ -47,6 +47,14 @@ struct user32
         _In_ const RECT *lpRect,
         _In_       BOOL bErase);
 
+    HANDLE (WINAPI *LoadImageW)(
+        _In_opt_ HINSTANCE hinst,
+        _In_     LPCTSTR   lpszName,
+        _In_     UINT      uType,
+        _In_     int       cxDesired,
+        _In_     int       cyDesired,
+        _In_     UINT      fuLoad);
+
     BOOL (WINAPI *KillTimer)(
         _In_opt_ HWND     hWnd,
         _In_     UINT_PTR uIDEvent);

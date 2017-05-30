@@ -1,3 +1,4 @@
+// @language: c++14
 // @os: win32
 #define UNICODE 1
 #define _UNICODE 1
@@ -20,6 +21,11 @@
 #include <Shellapi.h>
 
 #include "win32_wasapi_sound.hpp"
+#if UU_FOCUS_INTERNAL
+#include "win32_reloadable_modules.hpp"
+#endif
+
+#include "win32_utils.ipp"
 
 #include "win32_comctl32.hpp"
 #include "win32_kernel32.hpp"
@@ -57,6 +63,13 @@ static uint64_t now_micros();
 
 static ID2D1Factory *global_d2d1factory;
 static IDWriteFactory* global_dwritefactory;
+
+#if UU_FOCUS_INTERNAL
+#include "uu_focus_ui.hpp"
+static win32_reloadable_modules::ReloadableModule global_ui_module;
+typedef UU_FOCUS_RENDER_UI_PROC(UUFocusRenderUIProc);
+static UUFocusRenderUIProc *global_uu_focus_ui_render;
+#endif
 
 struct Platform {
     HWND main_hwnd;
@@ -110,6 +123,14 @@ extern "C" int WINAPI WinMain(
         main_class.style = CS_VREDRAW | CS_HREDRAW;
         main_class.lpfnWndProc = main_window_proc;
         main_class.lpszClassName = L"uu_focus";
+        main_class.hIcon = (HICON)user32.LoadImageW(
+            GetModuleHandle(nullptr),
+            IDI_APPLICATION,
+            IMAGE_ICON,
+            0, 0, LR_DEFAULTSIZE);
+        if (!main_class.hIcon) {
+            return GetLastError();
+        }
     }
     user32.RegisterClassExW(&main_class);
     auto main_hwnd = user32.CreateWindowExW(
@@ -137,13 +158,16 @@ extern "C" int WINAPI WinMain(
 
     auto& sound = global_sound;
     win32_wasapi_sound_open_stereo(&sound, 48000); // TODO(nicolas): how about opening/closing on demand
-    global_sound_thread = kernel32.CreateThread(
-        /* thread attributes */nullptr,
-        /* default stack size */0,
-        audio_thread_main,
-        /* parameter*/ 0,
-        /* creation state flag: start immediately */0,
-        nullptr);
+    if (sound.header.error == WasapiStreamError_Success)
+    {
+        kernel32.CreateThread(
+            /* thread attributes */nullptr,
+            /* default stack size */0,
+            audio_thread_main,
+            /* parameter*/ 0,
+            /* creation state flag: start immediately */0,
+            nullptr);
+    }
 
     /* win32 message loop */ {
         MSG msg;
@@ -196,6 +220,10 @@ static WIN32_WINDOW_PROC(main_window_proc)
             main_state.input.time_micros = now_micros();
 
             uu_focus_main(&main_state);
+
+#if UU_FOCUS_INTERNAL
+            win32_reloadable_modules::make_in_path(&global_ui_module, "H:\\uu.focus\\builds", "uu_focus_ui");
+#endif
         } break;
 
         case WM_DESTROY: {
@@ -228,6 +256,14 @@ static WIN32_WINDOW_PROC(main_window_proc)
             }
         } break;
     }
+#if UU_FOCUS_INTERNAL
+    if (win32_reloadable_modules::has_changed(&global_ui_module)) {
+        auto reload_attempt = load(&global_ui_module);
+        address_assign(&global_uu_focus_ui_render, (HMODULE)global_ui_module.dll,
+                       "win32_uu_focus_ui_render");
+        platform_render_async(&global_platform);
+    }
+#endif
     return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
@@ -239,10 +275,10 @@ static void d2d1_render(HWND hwnd)
     static int count = 0;
     ++count; // paint once
 
-    static ID2D1HwndRenderTarget* global_render_target;
     static HWND global_hwnd;
     static int global_client_width;
     static int global_client_height;
+    static ID2D1HwndRenderTarget* global_render_target;
 
     auto& user32 = modules_user32;
     auto& d2d1factory = *global_d2d1factory;
@@ -268,7 +304,6 @@ static void d2d1_render(HWND hwnd)
         global_client_height = height;
     }
 
-    if (S_OK != hr) return;
     auto &rt = *global_render_target;
     rt.BeginDraw();
 
@@ -280,6 +315,13 @@ static void d2d1_render(HWND hwnd)
         rt.Clear(D2D1::ColorF(D2D1::ColorF::Green, 1.0f));
         timer_render(*main.timer_effect, &rt);
     }
+
+#if UU_FOCUS_INTERNAL
+    if (global_uu_focus_ui_render) {
+        global_uu_focus_ui_render(&rt, global_d2d1factory, global_dwritefactory);
+    }
+#endif
+
     hr = rt.EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) {
         rt.Release();
@@ -411,39 +453,6 @@ static void welcome_render(ID2D1HwndRenderTarget* _rt)
     text_l = string_push_zstring(
         text_l, text_e, "Press LMB to start timer.");
     centered_text_render(_rt, text, text_l);
-
-#if UU_FOCUS_INTERNAL
-    /* path geometry test */ {
-        auto &d2d1factory = *global_d2d1factory;
-        ID2D1PathGeometry* _path_geometry;
-        auto hr = d2d1factory.CreatePathGeometry(&_path_geometry);
-        if (hr != S_OK) return;
-
-        auto& pg = *_path_geometry;
-        ID2D1GeometrySink* _path_geometry_sink;
-        if (SUCCEEDED(pg.Open(&_path_geometry_sink))) {
-            auto &sink = *_path_geometry_sink;
-            sink.BeginFigure(D2D1::Point2F(0, 0),
-                             D2D1_FIGURE_BEGIN_HOLLOW);
-            sink.AddLine(D2D1::Point2F(100, 100));
-            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-            sink.Close();
-
-            _path_geometry_sink->Release();
-            _path_geometry_sink = nullptr;
-        }
-
-        auto& rt = *_rt;
-        ID2D1SolidColorBrush* fg_brush;
-        rt.CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White, 1.0f), &fg_brush);
-        rt.DrawGeometry(_path_geometry, fg_brush);
-
-        fg_brush->Release();
-
-        _path_geometry->Release();
-        _path_geometry = nullptr;
-    }
-#endif
 }
 
 static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* _rt)
@@ -486,29 +495,7 @@ void platform_render_async(Platform* _platform)
     user32.InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-struct UITextValue
-{
-    char const* utf8_data_first;
-    int32_t utf8_data_size;
-    enum : char { MemoryOwnership_Borrowed } ownership;
-};
-static_assert(sizeof (UITextValue) <= sizeof (UIText), "value must fit");
-
-// TODO(nicolas): works only with literals for now
-UIText ui_text(char const* zstr)
-{
-    UITextValue text;
-    text.ownership = UITextValue::MemoryOwnership_Borrowed;
-    text.utf8_data_first = zstr;
-    int n = 0;
-    while(*zstr++) ++n;
-    text.utf8_data_size = n;
-
-    UIText result;
-    memcpy(&result, &text, sizeof text);
-    return result;
-}
-
+#include "uu_focus_platform_types.hpp"
 #include <Strsafe.h>
 
 void platform_notify(Platform* _platform, UIText _text)
@@ -580,6 +567,7 @@ static THREAD_PROC(audio_thread_main)
 
 #include "uu_focus_main.cpp"
 #include "uu_focus_effects.cpp"
+#include "uu_focus_platform.cpp"
 
 #include "win32_wasapi_sound.cpp"
 
@@ -587,3 +575,4 @@ static THREAD_PROC(audio_thread_main)
 #include "win32_user32.cpp"
 #include "win32_shell32.cpp"
 #include "win32_kernel32.cpp"
+

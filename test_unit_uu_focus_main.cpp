@@ -1,6 +1,8 @@
+// @language: c++14
 #include "uu_focus_main.hpp"
 
 #include <cassert>
+#include <string>
 #include <vector>
 
 struct TimerEffect
@@ -29,7 +31,7 @@ std::size_t count_range(BoundedRange r, typename BoundedRange::value_type const&
     return count(begin(r), end(r), x);
 }
 
-int main(int argc, char** argv)
+int main(int, char**)
 {
     auto const input = [](UUFocusMainCoroutine* _program, Command x) {
         auto &program = *_program;

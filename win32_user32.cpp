@@ -15,6 +15,7 @@ user32 LoadUser32(kernel32 const& kernel32)
         E(GetMessageW);
         E(InvalidateRect);
         E(KillTimer);
+        E(LoadImageW);
         E(MessageBoxW);
         E(PostQuitMessage);
         E(RegisterClassExW);

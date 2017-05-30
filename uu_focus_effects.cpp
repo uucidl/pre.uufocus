@@ -1,3 +1,4 @@
+// @language: c++14
 #include "uu_focus_effects.hpp"
 #include "uu_focus_effects_types.hpp"
 
@@ -7,13 +8,13 @@
 #include <random>
 
 static double global_audio_amp_target = 0.0;
-static uint64_t global_audio_fade_remaining_frames = 0;
+static uint64_t global_audio_fade_remaining_samples = 0;
 
 static void set_main_fade(double target, uint64_t duration_micros)
 {
     global_audio_amp_target = target;
-    uint64_t micros_per_frame = 1'000'000/48000;
-    global_audio_fade_remaining_frames = duration_micros/micros_per_frame;
+    uint64_t micros_per_sample = 1'000'000/48000;
+    global_audio_fade_remaining_samples = duration_micros/micros_per_sample;
 }
 
 static void audio_fade_in(uint64_t duration_micros)
@@ -113,47 +114,53 @@ static void pink_noise_n(PinkNoiseState *_s, float* stereo_frames, int frame_cou
     }
 }
 
-void audio_thread_render(AudioEffect*, float* stereo_frames, int frame_count)
+void audio_thread_render(AudioEffect*, float* stereo_samples, int sample_count)
 {
     static double amp = 0.0;
-    auto& fade_remaining_frames = global_audio_fade_remaining_frames;
+    auto& fade_remaining_samples = global_audio_fade_remaining_samples;
     auto const amp_target = global_audio_amp_target;
 
     double amp_inc = 0.0;
-    if (fade_remaining_frames != 0) {
-        amp_inc = double(amp_target - amp) / fade_remaining_frames;
+    if (fade_remaining_samples != 0) {
+        amp_inc = double(amp_target - amp) / fade_remaining_samples;
     }
 
-    if (fade_remaining_frames == 0 && amp_target == 0.0) {
-        memset(stereo_frames, 0, frame_count * 2 * sizeof(float));
+    if (fade_remaining_samples == 0 && amp_target == 0.0) {
+        memset(stereo_samples, 0, sample_count * 2 * sizeof(float));
     } else {
 #if UU_FOCUS_INTERNAL
-        reference_tone_n(stereo_frames, frame_count);
+        reference_tone_n(stereo_samples, sample_count);
 #else
         auto pink_noise_amp = db_to_amp(-26);
         static PinkNoiseState pink = {};
-        pink_noise_n(&pink, stereo_frames, frame_count);
-        for (int i = 0; i < frame_count; ++i) {
+        pink_noise_n(&pink, stereo_samples, sample_count);
+        for (int i = 0; i < sample_count; ++i) {
             float y = float(pink_noise_amp);
-            stereo_frames[2*i] *= y;
-            stereo_frames[2*i + 1] *= y;
+            stereo_samples[2*i] *= y;
+            stereo_samples[2*i + 1] *= y;
         }
 #endif
-        for (int i = 0; i < frame_count; ++i) {
+        for (int i = 0; i < sample_count; ++i) {
             auto y = amp;
-            stereo_frames[2*i] *= float(y);
-            stereo_frames[2*i + 1] *= float(y);
-            if (fade_remaining_frames == 0) {
+            stereo_samples[2*i] *= float(y);
+            stereo_samples[2*i + 1] *= float(y);
+            if (fade_remaining_samples == 0) {
                 amp = amp_target;
-            } else if (fade_remaining_frames > 0) {
+            } else if (fade_remaining_samples > 0) {
                 amp += amp_inc;
-                --fade_remaining_frames;
+                --fade_remaining_samples;
             }
         }
     }
 }
 
-static int const default_duration_s = 25*60;
+static int const default_duration_s =
+#if UU_FOCUS_INTERNAL
+  5
+#else
+  25*60
+#endif
+  ;
 
 TimerEffect* timer_make(Platform* platform)
 {

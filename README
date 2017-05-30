@@ -1,0 +1,7 @@
+
+Project layout:
+_ <win32,macos>_*: platform specific files
+- *<win32,macos>_unit_*: compilation units 
+- *.hpp: interfaces
+- *.cpp: implementation
+- *.ipp: inline implementation, meant to be included

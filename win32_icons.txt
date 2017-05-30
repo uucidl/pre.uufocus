@@ -1,0 +1,20 @@
+@url: https://msdn.microsoft.com/en-us/library/ms997538.aspx
+@url: https://msdn.microsoft.com/en-us/library/dn742485.aspx#size_requirements
+
+Application Icons
+-----------------
+
+Windows is aware of four different icon sizes:
+- System Small ; SM_CXSMICON, SM_CYSMICON
+- System Large ; SM_CXICON, SM_CYICON
+- Shell Small
+- Shell Large.
+
+Developers are encouraged to include a minimum of the following
+sizes and color depths in their icon resources:
+- 16x16 16 colors
+- 32x32 16 colors
+- 48x48 256 colors
+- 64x64
+- 256x256
+
