@@ -5,6 +5,7 @@
 kernel32 LoadKernel32()
 {
     kernel32 result = {};
+    result.CreateEventW = ::CreateEventW;
     result.CreateThread = ::CreateThread;
     result.GetProcAddress = ::GetProcAddress;
     result.GetLastError = ::GetLastError;
@@ -12,6 +13,7 @@ kernel32 LoadKernel32()
     result.MultiByteToWideChar = ::MultiByteToWideChar;
     result.QueryPerformanceCounter = ::QueryPerformanceCounter;
     result.QueryPerformanceFrequency = ::QueryPerformanceFrequency;
+    result.SetEvent = ::SetEvent;
     return result;
 }
 

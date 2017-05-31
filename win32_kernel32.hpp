@@ -4,6 +4,12 @@
 
 struct kernel32
 {
+    HANDLE (WINAPI *CreateEventW)(
+        _In_opt_ LPSECURITY_ATTRIBUTES lpEventAttributes,
+        _In_     BOOL                  bManualReset,
+        _In_     BOOL                  bInitialState,
+        _In_opt_ wchar_t const*        lpName);
+
     HANDLE (WINAPI *CreateThread)(
         _In_opt_  LPSECURITY_ATTRIBUTES  lpThreadAttributes,
         _In_      SIZE_T                 dwStackSize,
@@ -35,6 +41,8 @@ struct kernel32
     BOOL (WINAPI *QueryPerformanceFrequency)(
         _Out_ LARGE_INTEGER *lpFrequency);
 
+    BOOL (WINAPI *SetEvent)(
+        _In_ HANDLE hevent);
 };
 
 kernel32 LoadKernel32();
