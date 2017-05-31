@@ -48,7 +48,9 @@ static comctl32 modules_comctl32;
 static UUFocusMainCoroutine global_uu_focus_main;
 static uint64_t global_qpf_hz;
 static uint64_t global_qpc_origin;
-static int32_t global_audio_thread_must_quit;
+
+static HANDLE global_sound_thread;
+static int32_t global_sound_thread_must_quit;
 static WasapiStream global_sound;
 
 static uint64_t now_micros();
@@ -135,14 +137,13 @@ extern "C" int WINAPI WinMain(
 
     auto& sound = global_sound;
     win32_wasapi_sound_open_stereo(&sound, 48000); // TODO(nicolas): how about opening/closing on demand
-    DWORD thread_id;
-    kernel32.CreateThread(
+    global_sound_thread = kernel32.CreateThread(
         /* thread attributes */nullptr,
         /* default stack size */0,
         audio_thread_main,
         /* parameter*/ 0,
         /* creation state flag: start immediately */0,
-        &thread_id);
+        nullptr);
 
     /* win32 message loop */ {
         MSG msg;
@@ -152,7 +153,8 @@ extern "C" int WINAPI WinMain(
         }
     }
 
-    global_audio_thread_must_quit = 1;
+    global_sound_thread_must_quit = 1;
+    WaitForSingleObject(global_sound_thread, INFINITE);
     win32_wasapi_sound_close(&sound);
 
     return error;
@@ -557,7 +559,8 @@ void platform_notify(Platform* _platform, UIText _text)
 
 static THREAD_PROC(audio_thread_main)
 {
-    while (!global_audio_thread_must_quit) {
+    auto& kernel32 = modules_kernel32;
+    while (!global_sound_thread_must_quit) {
         auto buffer = win32_wasapi_sound_buffer_block_acquire(&global_sound, 48000 / 60 + 2 * 48);
         audio_thread_render(
             nullptr,
