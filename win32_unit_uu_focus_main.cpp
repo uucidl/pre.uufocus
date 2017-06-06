@@ -796,6 +796,7 @@ void platform_render_async(Platform* _platform)
 }
 
 #include "uu_focus_platform_types.hpp"
+
 #include <Strsafe.h>
 
 static void win32_notifyicon_make(NOTIFYICONDATA* nid_, Platform const& platform)
