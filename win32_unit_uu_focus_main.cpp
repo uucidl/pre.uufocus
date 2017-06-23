@@ -536,8 +536,15 @@ void platform_notify(Platform* _platform, UIText _text)
         NOTIFYICONDATA nid = {};
         nid.cbSize = sizeof nid;
         nid.hWnd = platform.main_hwnd;
-        nid.uFlags = NIF_ICON | NIF_TIP | NIF_GUID;
-        nid.guidItem = {0x8a91e682, 0x35d3, 0x443e, { 0xa2, 0xda, 0x9f, 0x4a, 0x19, 0xfc, 0xe8, 0x66} };
+        nid.uFlags = NIF_ICON | NIF_TIP;
+        // NOTE(uucidl): we decided against using the guid, as it disallows sharing the notification with multiple executables.. Once the GUID is registered, you cannot move/rename etc.. the executable.
+        // @url: https://blogs.msdn.microsoft.com/asklar/2012/03/06/system-tray-notification-area-icons/
+        if (false) {
+            nid.guidItem = {0x8a91e682, 0x35d3, 0x443e, { 0xa2, 0xda, 0x9f, 0x4a, 0x19, 0xfc, 0xe8, 0x66} };
+            nid.uFlags |= NIF_GUID;
+        } else {
+            nid.uID = 0x8a91e682;
+        }
         StringCchCopy(nid.szTip, ARRAYSIZE(nid.szTip), L"UUFocus");
         nid.uVersion = NOTIFYICON_VERSION_4;
 
@@ -553,13 +560,13 @@ void platform_notify(Platform* _platform, UIText _text)
         shell32.Shell_NotifyIconW(NIM_ADD, &nid);
         shell32.Shell_NotifyIconW(NIM_SETVERSION, &nid);
         shell32.Shell_NotifyIconW(NIM_MODIFY, &nid);
+        // TODO(uucidl): delete icon at destroy time
     }
 #endif
 }
 
 static THREAD_PROC(audio_thread_main)
 {
-    auto& kernel32 = modules_kernel32;
     while (!global_sound_thread_must_quit) {
         auto buffer = win32_wasapi_sound_buffer_block_acquire(&global_sound, 48000 / 60 + 2 * 48);
         audio_thread_render(
