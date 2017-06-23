@@ -30,5 +30,6 @@ cl -DUU_FOCUS_INTERNAL=0 ^
   -O2 -EHsc -Z7 -W3 -Fo%BuildObjDir%\ -nologo ^
   -link -PDB:%BuildDir%\uu_focus_release.pdb
 
+mt.exe -nologo -manifest %BuildDir%\uu_focus_release.exe.manifest -outputresource:%BuildDir%\uu_focus_release.exe;1
+
 copy %BuildDir%\uu_focus_release.exe %BuildDir%\uu_focus.exe
-mt.exe -nologo -manifest %BuildDir%\uu_focus.exe.manifest -outputresource:%BuildDir%\uu_focus.exe;1
