@@ -1,5 +1,6 @@
 #pragma once
 
+// TODO(uucidl): rename win32_proc_assign
 template <typename FnP>
 void
 address_assign(
