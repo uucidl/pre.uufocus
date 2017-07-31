@@ -8,6 +8,30 @@
 #include <D2d1.h>
 #include <D2d1_1.h>
 
+static void scale_centered(D2D1_RECT_F *d_rect_,
+                           D2D1_RECT_F const& rect,
+                           D2D1_RECT_F const& container_rect)
+{
+    auto &d_rect = *d_rect_;
+    float x0 = rect.left + (rect.right - rect.left)/2.0f;
+    float y0 = rect.top + (rect.bottom - rect.top)/2.0f;
+    float x1 = container_rect.left + (container_rect.right - container_rect.left)/2.0f;
+    float y1 = container_rect.top + (container_rect.bottom - container_rect.top)/2.0f;
+    float ws = (rect.right - rect.left) / (container_rect.right - container_rect.left);
+    float hs = (rect.bottom - rect.top) / (container_rect.bottom - container_rect.top);
+    if (ws > hs) {
+        d_rect.left = container_rect.left;
+        d_rect.right = container_rect.right;
+        d_rect.top = y1 + (rect.top - y0)/ws;
+        d_rect.bottom = y1 + (rect.bottom - y0)/ws;
+    } else {
+        d_rect.left = x1 + (rect.left - x0)/hs;
+        d_rect.right = x1 + (rect.right - x0)/hs;
+        d_rect.top = container_rect.top;
+        d_rect.bottom = container_rect.bottom;
+    }
+}
+
 UU_FOCUS_RENDER_UI_PROC(win32_uu_focus_ui_render)
 {
     static struct {
@@ -33,15 +57,17 @@ UU_FOCUS_RENDER_UI_PROC(win32_uu_focus_ui_render)
             &properties,
             &bitmap);
         if (bitmap) {
-            auto rect = D2D1::RectF(0.0f, 0.0f, float(bg.size_x), float(bg.size_y));
+            auto s_rect = D2D1::RectF(0.0f, 0.0f, float(bg.size_x), float(bg.size_y));
             auto size = rt->GetSize();
-            auto d_rect = D2D1::RectF(0.0f, 0.0f, size.width, size.height);
+            auto screen_rect = D2D1::RectF(0.0f, 0.0f, size.width, size.height);
+            D2D1_RECT_F d_rect;
+            scale_centered(&d_rect, s_rect, screen_rect);
             rt->DrawBitmap(
                 bitmap,
                 &d_rect,
                 1.0,
                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                &rect);
+                &s_rect);
             bitmap->Release();
         }
     }
@@ -74,7 +100,6 @@ UU_FOCUS_RENDER_UI_PROC(win32_uu_focus_ui_render)
         _path_geometry->Release();
         _path_geometry = nullptr;
     }
-
     return;
 }
 
