@@ -66,11 +66,6 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
             set(&program, 20); case 20:
             while (timer_is_active(timer)) {
                 auto const command = pop_command(&program);
-                auto timeout = step_elapsed_micros >= 1e6;
-                if (!timeout && !command.type) {
-                    return CoroutineState_Waiting;
-                }
-
                 if (command.type == Command_timer_stop) {
                     audio_stop(audio);
                     timer_stop(timer);
@@ -79,13 +74,11 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
                     return CoroutineState_Waiting;
                 } else if(command.type == Command_timer_start) {
                     timer_reset(timer);
-                    set(&program, 20); // reset timeout
-                } else if (timeout) {
-                    set(&program, 20); // reset timeout
                 }
                 timer_update_and_render(timer);
                 return CoroutineState_Waiting;
             }
+            ++program.timer_elapsed_n;
             timer_celebrate(timer);
             audio_stop(audio);
             timer_update_and_render(timer);
@@ -122,9 +115,6 @@ static void jump(UUFocusMainCoroutine* _program, int step)
 Project
 -------
 
-- TODO(nicolas): application .ico for windows
-- TODO(nicolas): foreground icon should be correct
-
 UI, thoughts
 ------------
 
@@ -136,7 +126,5 @@ Goals:
 - Clear notifications:
     + Win32 Notification aren't very obtrusive, I missed
       one while working a cycle without sound on.
-
-
 
 */

@@ -1,5 +1,6 @@
 // Tool to create a Microsoft Windows .ico file from a bunch of images.
 // @language: c++11
+// TODO(uucidl): alpha mask support for bmp outputs
 auto const USAGE_PATTERN = "USAGE: %s [--help] --output <filepath> [--] <inputfile>+\n";
 
 #include "3rdparty/stb_image.h"

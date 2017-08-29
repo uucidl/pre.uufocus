@@ -1,4 +1,5 @@
 // @language: c++14
+static char const* USAGE_PATTERN = "%s {--help,--quiet}";
 #include "uu_focus_main.hpp"
 
 #include <cassert>
@@ -18,8 +19,14 @@ struct AudioEffect
 
 struct Scenario
 {
-    Scenario(std::string name) { std::printf("TEST: %s\n", name.c_str()); }
-    ~Scenario() { std::printf("TEST END\n\n"); };
+    Scenario(std::string name) {
+        std::printf("TEST: %s\n", name.c_str());
+        fflush(stdout);
+    }
+    ~Scenario() {
+        std::printf("TEST END\n");
+        fflush(stdout);
+    };
 };
 
 static char const* CommandName(Command x);
@@ -31,12 +38,49 @@ std::size_t count_range(BoundedRange r, typename BoundedRange::value_type const&
     return count(begin(r), end(r), x);
 }
 
-int main(int, char**)
+struct TestOptions
 {
+    bool is_valid;
+    bool help_on;
+    bool console_output_off;
+};
+
+static TestOptions parse_test_options(char const* const * args_f,
+                                      char const* const * const args_l)
+{
+    TestOptions options = {};
+    while (args_f != args_l) {
+        if (0 == strcmp("--quiet", *args_f)) {
+            options.console_output_off = true;
+        } else if (0 == strcmp("--help", *args_f)) {
+            options.help_on = true;
+        } else {
+            return options; // invalid
+        }
+        ++args_f;
+    }
+    options.is_valid = true;
+    return options;
+}
+
+TestOptions global_test_options;
+
+int main(int argc, char** argv)
+{
+    auto options = parse_test_options(argv + 1, argv + argc);
+    if (options.help_on || !options.is_valid) {
+        std::printf(USAGE_PATTERN, *argv);
+        exit(options.is_valid ? 0 : 1);
+    }
+    global_test_options = options;
+
     auto const input = [](UUFocusMainCoroutine* _program, Command x) {
         auto &program = *_program;
         program.input.command.type = x;
-        std::printf("INPUT: %s\n", CommandName(x));
+        if (!global_test_options.console_output_off) {
+            std::printf("INPUT: %s\n", CommandName(x));
+            fflush(stdout);
+        }
     };
 
     {
@@ -91,10 +135,11 @@ int main(int, char**)
                == count_range(audio.actions, "audio stop")
                == 1);
         assert(count_range(timer.actions, "timer celebrate") == 0);
+        assert(program.timer_elapsed_n == 0);
     }
 
     {
-        Scenario _("the timer is updated at least once every second");
+        Scenario _("the timer is updated on every call");
         TimerEffect timer;
         AudioEffect audio;
         UUFocusMainCoroutine program;
@@ -110,7 +155,7 @@ int main(int, char**)
         program.input.time_micros += 200;
         uu_focus_main(&program);
         assert(count_range(timer.actions,
-                     "timer update_and_render") == 0);
+                     "timer update_and_render") == 2);
 
         program.input.time_micros += 500'000;
         uu_focus_main(&program);
@@ -119,12 +164,8 @@ int main(int, char**)
         uu_focus_main(&program);
 
         assert(count_range(timer.actions,
-                     "timer update_and_render") == 1);
-        assert(timer.actions.size() == 3);
-
-        program.input.time_micros += 200;
-        uu_focus_main(&program);
-        assert(timer.actions.size() == 3);
+                     "timer update_and_render") == 4);
+        assert(timer.actions.size() == 6);
     }
 
     {
@@ -152,6 +193,7 @@ int main(int, char**)
             assert(timer_reset != last);
             assert(timer.on_count == 1);
             assert(count_range(timer.actions, "timer celebrate") == 0);
+            assert(program.timer_elapsed_n == 0);
         }
     }
 
@@ -160,10 +202,12 @@ int main(int, char**)
         TimerEffect timer;
         AudioEffect audio;
         UUFocusMainCoroutine program;
+        enum { TIMER_ELAPSED_START = 31 };
         {
             program = {};
             program.timer_effect = &timer;
             program.audio_effect = &audio;
+            program.timer_elapsed_n = TIMER_ELAPSED_START;
         }
 
         input(&program, Command_timer_start);
@@ -174,6 +218,7 @@ int main(int, char**)
         uu_focus_main(&program);
 
         assert(1 == count_range(timer.actions, "timer celebrate"));
+        assert(program.timer_elapsed_n == TIMER_ELAPSED_START + 1);
     }
 }
 
@@ -199,7 +244,10 @@ static void effect_log(std::vector<std::string>* _trace, std::string x)
 {
     auto& trace = *_trace;
     trace.push_back(x);
-    std::printf("EFFECT: %s\n", x.c_str());
+    if (!global_test_options.console_output_off) {
+        std::printf("EFFECT: %s\n", x.c_str());
+        fflush(stdout);
+    }
 }
 
 void audio_start(AudioEffect* y)

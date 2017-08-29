@@ -10,6 +10,26 @@
 static double global_audio_amp_target = 0.0;
 static uint64_t global_audio_fade_remaining_samples = 0;
 
+enum AudioMode {
+    AudioMode_Noise,
+#if UU_FOCUS_INTERNAL
+    AudioMode_ReferenceTone,
+#endif
+    AudioMode_Last,
+};
+
+int global_audio_mode =
+#if UU_FOCUS_INTERNAL
+    AudioMode_ReferenceTone
+#else
+    AudioMode_Noise
+#endif
+    ;
+int global_audio_mode_mod = AudioMode_Last;
+double global_separation_ms = 1.8;
+double global_separation_ms_min = 0.0;
+double global_separation_ms_max = 15.0;
+
 static void set_main_fade(double target, uint64_t duration_micros)
 {
     global_audio_amp_target = target;
@@ -52,22 +72,6 @@ static double white_noise_step()
     static std::uniform_real_distribution<> d(-1.0, 1.0);
     return d(g);
 }
-
-#if UU_FOCUS_INTERNAL
-static void reference_tone_n(float* stereo_frames, int frame_count)
-{
-    static const auto reference_hz = 1000;
-    static const auto reference_amp = db_to_amp(-20.0);
-    static double phase;
-
-    double phase_delta = reference_hz / 48000.0;
-    for (int i = 0; i < frame_count; ++i) {
-        float y = float(reference_amp * std::sin(TAU*phase));
-        stereo_frames[2*i] = stereo_frames[2*i + 1] = y;
-        phase += phase_delta;
-    }
-}
-#endif
 
 struct PinkNoiseState
 {
@@ -114,6 +118,125 @@ static void pink_noise_n(PinkNoiseState *_s, float* stereo_frames, int frame_cou
     }
 }
 
+#if UU_FOCUS_INTERNAL
+static void reference_tone_n(float* stereo_frames, int frame_count)
+{
+    static const auto reference_hz = 1000;
+    static const auto reference_amp = db_to_amp(-20.0);
+    static double phase;
+
+    double phase_delta = reference_hz / 48000.0;
+    for (int i = 0; i < frame_count; ++i) {
+        float y = float(reference_amp * std::sin(TAU*phase));
+        stereo_frames[2*i] = stereo_frames[2*i + 1] = y;
+        phase += phase_delta;
+    }
+}
+#endif
+
+typedef struct delay_t
+{
+	float* buffer;
+	int length;
+	int index;
+} delay_t;
+
+static int
+ceil_count_bits (int n)
+{
+    int bits = 1;
+    n--;
+    while ((n >>= 1) > 0) bits++;
+
+    return bits;
+}
+
+static inline void
+delay_make (delay_t* self, const int length)
+{
+	self->index = 0;
+	self->length = 1 << ceil_count_bits (length);
+	self->buffer = (float*)calloc (self->length, sizeof (float));
+}
+
+static inline void
+delay_free (delay_t* self)
+{
+	if (self->buffer) {
+		free (self->buffer);
+	}
+    self->length = 0;
+}
+
+static inline float
+delay_get (delay_t* self, const int time)
+{
+	return self->buffer[(self->index - time) & (self->length - 1)];
+}
+
+static inline void
+delay_set (delay_t* self, const float val)
+{
+	self->buffer[self->index] = val;
+}
+
+static inline void
+delay_advance (delay_t* self)
+{
+	self->index++;
+	self->index &= (self->length - 1);
+}
+
+// Calculates next sample of the delay
+static inline float
+delay_next (delay_t* self, const float input, const int time)
+{
+	delay_set (self, input);
+	const float val = delay_get (self, time);
+	delay_advance (self);
+	return val;
+}
+
+static void noise_render_n(float* stereo_samples, int sample_count)
+{
+    static PinkNoiseState pink[2] = {};
+    static delay_t delay_lines[2] = {};
+    static int separation_n_max = int(global_separation_ms_max*48000.0/1000.0);
+    for (int i = 0; i < 2; ++i) {
+        if (!delay_lines[i].buffer || delay_lines[i].length < separation_n_max) {
+            delay_free(&delay_lines[i]);
+            delay_make(&delay_lines[i], separation_n_max);
+        }
+    }
+
+    int separation_n = int(global_separation_ms*48000.0/1000.0);
+    if (separation_n >= separation_n_max) separation_n = separation_n_max - 1;
+    if (separation_n < 0) separation_n = 0;
+
+    auto pink_noise_amp = db_to_amp(-26);
+    for (int sample_i = 0; sample_i < sample_count; ++sample_i) {
+        auto output = stereo_samples + 2*sample_i;
+        for (int pink_i = 0; pink_i < 2; ++pink_i) {
+            auto& ps = pink[pink_i];
+            auto white = white_noise_step();
+            pink_noise_step(&ps, white);
+            auto y = float(ps.pink);
+            output[pink_i] = float(y * pink_noise_amp);
+        }
+    }
+
+    // delayed crossfeed to shape image:
+    for (int sample_i = 0; sample_i < sample_count; ++sample_i) {
+        auto output = stereo_samples + 2*sample_i;
+        float a = delay_next(&delay_lines[0], output[0], separation_n);
+        float b = delay_next(&delay_lines[1], output[1], separation_n);
+        float l = output[0];
+        float r = output[1];
+        output[0] = output[0]*0.55f + 0.25f*b + 0.20f*r;
+        output[1] = output[1]*0.55f + 0.25f*a + 0.20f*l;
+    }
+}
+
 void audio_thread_render(AudioEffect*, float* stereo_samples, int sample_count)
 {
     static double amp = 0.0;
@@ -128,18 +251,18 @@ void audio_thread_render(AudioEffect*, float* stereo_samples, int sample_count)
     if (fade_remaining_samples == 0 && amp_target == 0.0) {
         memset(stereo_samples, 0, sample_count * 2 * sizeof(float));
     } else {
+        switch((AudioMode)global_audio_mode) {
 #if UU_FOCUS_INTERNAL
-        reference_tone_n(stereo_samples, sample_count);
-#else
-        auto pink_noise_amp = db_to_amp(-26);
-        static PinkNoiseState pink = {};
-        pink_noise_n(&pink, stereo_samples, sample_count);
-        for (int i = 0; i < sample_count; ++i) {
-            float y = float(pink_noise_amp);
-            stereo_samples[2*i] *= y;
-            stereo_samples[2*i + 1] *= y;
-        }
+            case AudioMode_ReferenceTone: {
+                reference_tone_n(stereo_samples, sample_count);
+            } break;
 #endif
+            case AudioMode_Noise: {
+                noise_render_n(stereo_samples, sample_count);
+            }
+
+            case AudioMode_Last: break;
+        }
         for (int i = 0; i < sample_count; ++i) {
             auto y = amp;
             stereo_samples[2*i] *= float(y);

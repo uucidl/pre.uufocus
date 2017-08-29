@@ -10,6 +10,11 @@ LRESULT expr(                   \
 
 struct user32
 {
+    BOOL (WINAPI *AdjustWindowRect)(
+        _Inout_ LPRECT lpRect,
+        _In_    DWORD  dwStyle,
+        _In_    BOOL   bMenu);
+
     HWND (WINAPI *CreateWindowExW)(
         DWORD     dwExStyle,
         wchar_t const*   lpClassName,

@@ -1,6 +1,15 @@
 #pragma once
 #define UU_FOCUS_EFFECTS
 
+#if UU_FOCUS_INTERNAL
+// internal, tweaking parameters
+extern int global_audio_mode;
+extern int global_audio_mode_mod;
+extern double global_separation_ms;
+extern double global_separation_ms_min;
+extern double global_separation_ms_max;
+#endif
+
 struct Platform;
 
 struct AudioEffect;

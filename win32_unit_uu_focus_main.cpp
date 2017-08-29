@@ -1,10 +1,16 @@
 // @language: c++14
 // @os: win32
-#define UNICODE 1
-#define _UNICODE 1
+static const wchar_t* const global_application_name = L"UUFocus";
 
+// Configuration:
 #define PLATFORM_NOTIFY_USE_MESSAGEBOX 0
 #define PLATFORM_NOTIFY_USE_NOTIFICATION_AREA 1
+
+#define UNICODE 1
+#define _UNICODE 1
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 
 #include "uu_focus_main.hpp"
 #include "uu_focus_effects.hpp"
@@ -28,6 +34,7 @@
 #include "win32_utils.ipp"
 
 #include "win32_comctl32.hpp"
+#include "win32_gdi32.hpp"
 #include "win32_kernel32.hpp"
 #include "win32_user32.hpp"
 #include "win32_shell32.hpp"
@@ -50,6 +57,7 @@ static kernel32 modules_kernel32;
 static user32 modules_user32;
 static shell32 modules_shell32;
 static comctl32 modules_comctl32;
+static gdi32 modules_gdi32;
 
 static UUFocusMainCoroutine global_uu_focus_main;
 static uint64_t global_qpf_hz;
@@ -65,6 +73,10 @@ static ID2D1Factory *global_d2d1factory;
 static IDWriteFactory* global_dwritefactory;
 
 #if UU_FOCUS_INTERNAL
+
+extern size_t global_palettes_n;
+extern int global_palette_i;
+
 #include "uu_focus_ui.hpp"
 static win32_reloadable_modules::ReloadableModule global_ui_module;
 typedef UU_FOCUS_RENDER_UI_PROC(UUFocusRenderUIProc);
@@ -76,6 +88,12 @@ struct Platform {
 } global_platform;
 
 static THREAD_PROC(audio_thread_main);
+
+static void win32_platform_init(struct Platform*, HWND);
+static void win32_platform_shutdown(struct Platform*);
+static void win32_set_background(WNDCLASSEX* wndclass);
+static void win32_abort_with_message(char const* pattern, ...);
+#define WIN32_ABORT(...) __debugbreak(); win32_abort_with_message(__VA_ARGS__)
 
 extern "C" int WINAPI WinMain(
     _In_ HINSTANCE hI,
@@ -117,6 +135,9 @@ extern "C" int WINAPI WinMain(
 
     auto const user32 = LoadUser32(kernel32);
     modules_user32 = user32;
+    auto const gdi32 = LoadGdi32(kernel32);
+    modules_gdi32 = gdi32;
+
     WNDCLASSEXW main_class = {};
     {
         main_class.cbSize = sizeof(main_class);
@@ -131,21 +152,30 @@ extern "C" int WINAPI WinMain(
         if (!main_class.hIcon) {
             return GetLastError();
         }
+        win32_set_background(&main_class); // avoid flashing white at ShowWindow
     }
     user32.RegisterClassExW(&main_class);
-    auto main_hwnd = user32.CreateWindowExW(
-        DWORD{0},
-        main_class.lpszClassName,
-        L"UUFocus",
-        DWORD{WS_OVERLAPPEDWINDOW},
-        int32_t(CW_USEDEFAULT),
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        HWND{0},
-        HMENU{0},
-        HINSTANCE{0},
-        0);
+    HWND main_hwnd = {};
+    {
+        DWORD window_style = WS_OVERLAPPEDWINDOW;
+        RECT window_rect = {};
+        window_rect.right = 600;
+        window_rect.bottom = 200;
+        user32.AdjustWindowRect(&window_rect, window_style, /*bMenu*/false);
+        main_hwnd = user32.CreateWindowExW(
+            DWORD{0},
+            main_class.lpszClassName,
+            global_application_name,
+            window_style,
+            /* x */ int32_t(CW_USEDEFAULT),
+            /* y */ CW_USEDEFAULT,
+            /* nWidth */ window_rect.right - window_rect.left,
+            /* nHeight */ window_rect.bottom - window_rect.top,
+            /* hWwndParent */ HWND{0},
+            HMENU{0},
+            HINSTANCE{0},
+            0);
+    }
     DWORD error = {};
     if (!main_hwnd) {
         error = kernel32.GetLastError();
@@ -181,6 +211,8 @@ extern "C" int WINAPI WinMain(
     WaitForSingleObject(global_sound_thread, INFINITE);
     win32_wasapi_sound_close(&sound);
 
+    win32_platform_shutdown(&global_platform);
+
     return error;
 }
 
@@ -194,7 +226,13 @@ static uint64_t now_micros()
     return y;
 }
 
-static void d2d1_render(HWND hwnd);
+struct Ui;
+static void d2d1_render(HWND hwnd, Ui*);
+
+struct Ui
+{
+    double validity_ms; // time to live for the produced frame
+};
 
 static WIN32_WINDOW_PROC(main_window_proc)
 {
@@ -212,7 +250,7 @@ static WIN32_WINDOW_PROC(main_window_proc)
     switch (uMsg) {
         case WM_CREATE: {
             // init
-            global_platform.main_hwnd = hWnd;
+            win32_platform_init(&global_platform, hWnd);
 
             auto &main_state = global_uu_focus_main;
             main_state.timer_effect = timer_make(&global_platform);
@@ -237,7 +275,6 @@ static WIN32_WINDOW_PROC(main_window_proc)
             main.input.command.type = Command_timer_start;
             uu_focus_main(&main);
             auto timer_period_ms = 60;
-            user32.SetTimer(hWnd, refresh_timer_id, timer_period_ms, NULL);
         } break;
 
         case WM_RBUTTONDOWN: {
@@ -245,8 +282,37 @@ static WIN32_WINDOW_PROC(main_window_proc)
             uu_focus_main(&main);
         } break;
 
+#if UU_FOCUS_INTERNAL
+        case WM_KEYDOWN: {
+            if (wParam == VK_RIGHT) {
+                global_palette_i = (global_palette_i + 1) % global_palettes_n;
+            } else {
+                global_audio_mode = (global_audio_mode + 1) % global_audio_mode_mod;
+            }
+            platform_render_async(&global_platform);
+        } break;
+
+        case WM_MOUSEWHEEL: {
+            auto zDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+            double delta = double(zDelta) / WHEEL_DELTA;
+            double total_increments = global_separation_ms_max - global_separation_ms_min;
+            double y_ms = global_separation_ms;
+            y_ms += delta/total_increments;
+            if (y_ms > global_separation_ms_max) y_ms = global_separation_ms_max;
+            if (y_ms < global_separation_ms_min) y_ms = global_separation_ms_min;
+            global_separation_ms = y_ms;
+            platform_render_async(&global_platform);
+        } break;
+#endif
+
         case WM_PAINT: {
-            d2d1_render(hWnd);
+            Ui ui = {};
+            ui.validity_ms = 1e6;
+            d2d1_render(hWnd, &ui);
+            ui.validity_ms = ui.validity_ms < 0.0? 0.0 : ui.validity_ms;
+            if (refresh_timer_id != user32.SetTimer(hWnd, refresh_timer_id, UINT(ui.validity_ms), NULL)) {
+              WIN32_ABORT("Could not SetTimer: %x", GetLastError());
+            }
         } break;
 
         case WM_TIMER: {
@@ -267,10 +333,48 @@ static WIN32_WINDOW_PROC(main_window_proc)
     return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
-static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt);
+struct Ui;
+static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt, Ui*);
 static void welcome_render(ID2D1HwndRenderTarget* rt);
+#if UU_FOCUS_INTERNAL
+static void internal_ui_render(ID2D1HwndRenderTarget* rt);
+#endif
 
-static void d2d1_render(HWND hwnd)
+static struct {
+    float bg_off[3];
+    float bg_on[3];
+} global_palettes[] = {
+    {
+        { 110.0f/255.0f, 154.0f/255.0f, 201.0f/255.0f },
+        { 166.0f/255.0f, 200.0f/255.0f, 235.0f/255.0f },
+    },
+    {
+        { 153.0f/255.0f, 140.0f/255.0f, 131.0f/255.0f },
+        { 218.0f/255.0f, 204.0f/255.0f, 193.0f/255.0f },
+    },
+    {
+        {  44.0f/255.0f,  60.0f/255.0f,  13.0f/255.0f },
+        { 165.0f/255.0f, 131.0f/255.0f,  85.0f/255.0f },
+    },
+    {
+        {  90.0f/255.0f, 103.0f/255.0f,  50.0f/255.0f },
+        { 182.0f/255.0f, 170.0f/255.0f, 154.0f/255.0f },
+    },
+};
+size_t global_palettes_n = sizeof global_palettes / sizeof *global_palettes;
+int global_palette_i = 0;
+
+static void win32_set_background(WNDCLASSEX* window_class_)
+{
+    auto &window_class = *window_class_;
+    auto const& gdi32 = modules_gdi32;
+    auto const& bg = global_palettes[0].bg_on;
+    // NOTE(nil): @leak we don't care, this is done once per app.
+    auto bgbrush = gdi32.CreateSolidBrush(RGB(bg[0], bg[1], bg[2]));
+    window_class.hbrBackground = bgbrush;
+}
+
+static void d2d1_render(HWND hwnd, Ui* ui_)
 {
     static int count = 0;
     ++count; // paint once
@@ -280,7 +384,8 @@ static void d2d1_render(HWND hwnd)
     static int global_client_height;
     static ID2D1HwndRenderTarget* global_render_target;
 
-    auto& user32 = modules_user32;
+    auto& ui = *ui_;
+    auto const& user32 = modules_user32;
     auto& d2d1factory = *global_d2d1factory;
 
     RECT rc;
@@ -308,17 +413,24 @@ static void d2d1_render(HWND hwnd)
     rt.BeginDraw();
 
     auto &main = global_uu_focus_main;
+    auto palette_i = (global_palette_i + main.timer_elapsed_n)
+        % global_palettes_n;
+
     if (!timer_is_active(main.timer_effect)) {
-        rt.Clear(D2D1::ColorF(D2D1::ColorF::Black, 1.0f));
+        auto bg_color = global_palettes[palette_i].bg_off;
+        rt.Clear(D2D1::ColorF(bg_color[0], bg_color[1], bg_color[2], 1.0f));
         welcome_render(&rt);
+
     } else /* timer is active */ {
-        rt.Clear(D2D1::ColorF(D2D1::ColorF::Green, 1.0f));
-        timer_render(*main.timer_effect, &rt);
+        auto bg_color = global_palettes[palette_i].bg_on;
+        rt.Clear(D2D1::ColorF(bg_color[0], bg_color[1], bg_color[2], 1.0f));
+        timer_render(*main.timer_effect, &rt, ui_);
     }
 
 #if UU_FOCUS_INTERNAL
     if (global_uu_focus_ui_render) {
         global_uu_focus_ui_render(&rt, global_d2d1factory, global_dwritefactory);
+        internal_ui_render(&rt);
     }
 #endif
 
@@ -326,6 +438,7 @@ static void d2d1_render(HWND hwnd)
     if (hr == D2DERR_RECREATE_TARGET) {
         rt.Release();
         global_render_target = nullptr;
+        ui.validity_ms = 0;
     }
 }
 
@@ -397,6 +510,19 @@ static char* string_push_i32(char* dst_first,
     return dst_first + n;
 }
 
+#include <cstdio>
+
+static char* string_push_double(char* dst_first,
+                                char* const dst_last,
+                                double x)
+{
+    auto res = std::snprintf(dst_first, dst_last - dst_first, "%f", x);
+    if (res < 0) {
+        return dst_first;
+    }
+    return dst_first + res;
+}
+
 static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, char* text_last)
 {
     static IDWriteTextFormat *global_text_format;
@@ -411,7 +537,6 @@ static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, c
             /* font size */ 34,
             /* locale */ L"",
             &global_text_format);
-        // TODO(nicolas): hr ...
         if (S_OK != hr) return;
     }
 
@@ -426,15 +551,16 @@ static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, c
     wchar_t render_text[MAX_TEXT_SIZE];
     auto render_text_last = render_text +
         MultiByteToWideChar(
-            CP_UTF8,
-            0,
-            text_first,
-            int(text_last - text_first),
-            render_text,
-            MAX_TEXT_SIZE);
+        CP_UTF8,
+        0,
+        text_first,
+        int(text_last - text_first),
+        render_text,
+        MAX_TEXT_SIZE);
 
     ID2D1SolidColorBrush* fg_brush;
     rt.CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White, 1.0f), &fg_brush);
+    rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
     rt.DrawTextW(
         render_text,
         UINT32(render_text_last - render_text),
@@ -455,10 +581,18 @@ static void welcome_render(ID2D1HwndRenderTarget* _rt)
     centered_text_render(_rt, text, text_l);
 }
 
-static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* _rt)
+static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, Ui* ui_)
 {
-    int const timer_countdown_s =
-        1+int((timer.end_micros - now_micros())/1'000'000);
+    auto &ui = *ui_;
+
+    uint64_t end_from_now_micros = timer.end_micros - now_micros();
+    uint64_t end_from_now_rounded_micros = (end_from_now_micros/1'000'000) * 1'000'000;
+    uint64_t next_second_from_now_micros = end_from_now_micros - end_from_now_rounded_micros;
+
+    int const timer_countdown_s = 1+int(end_from_now_rounded_micros/1'000'000);
+    auto validity_ms = double(next_second_from_now_micros)*1e-3;
+    ui.validity_ms = validity_ms<ui.validity_ms? validity_ms : ui.validity_ms;
+
 
     enum { MAX_TEXT_SIZE = 100 };
     char text[MAX_TEXT_SIZE];
@@ -481,8 +615,81 @@ static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* _rt)
         text_last, text_end,
         "\npress RMB to stop, LMB to reset.");
 
-    centered_text_render(_rt, text, text_last);
+    centered_text_render(rt_, text, text_last);
 }
+
+#if UU_FOCUS_INTERNAL
+static void internal_ui_render(ID2D1HwndRenderTarget* rt_)
+{
+    enum { MAX_TEXT_SIZE = 100 };
+    char text[MAX_TEXT_SIZE];
+    auto text_first = text;
+    auto text_end = text + MAX_TEXT_SIZE;
+    auto text_last = text;
+    text_last = string_push_zstring(text_last, text_end, "Audio Separation: ");
+    text_last = string_push_double(text_last, text_end, global_separation_ms);
+    text_last = string_push_zstring(text_last, text_end, "ms");
+
+    char text2[MAX_TEXT_SIZE];
+    auto text2_first = text2;
+    auto text2_end = text2 + MAX_TEXT_SIZE;
+    auto text2_last = text2;
+    text2_last = string_push_zstring(text2_last, text2_end, "Audio Mode: ");
+    text2_last = string_push_i32(text2_last, text2_end, global_audio_mode, 2);
+
+    static IDWriteTextFormat *global_text_format;
+    auto &dwrite = *global_dwritefactory;
+    float font_height_px = 17;
+    if (!global_text_format) {
+        auto hr = dwrite.CreateTextFormat(
+            /* font name */ L"Calibri",
+            nullptr,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            font_height_px,
+            /* locale */ L"",
+            &global_text_format);
+        if (S_OK != hr) return;
+    }
+
+    auto &rt = *rt_;
+    auto &text_format = *global_text_format;
+    auto size = rt.GetSize();
+
+    text_format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+
+    struct { char* text_f; __int64 text_n; } lines[] = {
+        { text_first, text_last - text_first },
+        { text2_first, text2_last - text2_first },
+    };
+
+    float y = 0.0;
+    for (auto const& line : lines) {
+        wchar_t render_text[MAX_TEXT_SIZE];
+        auto render_text_last = render_text +
+            MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            line.text_f,
+            int(line.text_n),
+            render_text,
+            MAX_TEXT_SIZE);
+
+        ID2D1SolidColorBrush* fg_brush;
+        rt.CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White, 1.0f), &fg_brush);
+        rt.DrawTextW(
+            render_text,
+            UINT32(render_text_last - render_text),
+            &text_format,
+            D2D1::RectF(0, y, size.width, font_height_px),
+            fg_brush);
+        y += font_height_px;
+        fg_brush->Release();
+    }
+}
+#endif
+
 
 #include <cassert>
 
@@ -497,6 +704,23 @@ void platform_render_async(Platform* _platform)
 
 #include "uu_focus_platform_types.hpp"
 #include <Strsafe.h>
+
+static void win32_notifyicon_make(NOTIFYICONDATA* nid_, Platform const& platform)
+{
+    NOTIFYICONDATA& nid = *nid_;
+    nid = {};
+    nid.cbSize = sizeof nid;
+    nid.hWnd = platform.main_hwnd;
+    // NOTE(uucidl): we decided against using the guid, as it disallows sharing the notification with multiple executables.. Once the GUID is registered, you cannot move/rename etc.. the executable.
+    // @url: https://blogs.msdn.microsoft.com/asklar/2012/03/06/system-tray-notification-area-icons/
+    if (false) {
+        nid.guidItem = {0x8a91e682, 0x35d3, 0x443e, { 0xa2, 0xda, 0x9f, 0x4a, 0x19, 0xfc, 0xe8, 0x66} };
+        nid.uFlags |= NIF_GUID;
+    } else {
+        nid.uID = 0x8a91e682;
+    }
+    nid.uVersion = NOTIFYICON_VERSION_4;
+}
 
 void platform_notify(Platform* _platform, UIText _text)
 {
@@ -520,36 +744,44 @@ void platform_notify(Platform* _platform, UIText _text)
         auto& shell32 = modules_shell32;
         auto &comctl32 = modules_comctl32;
 
-        NOTIFYICONDATA nid = {};
-        nid.cbSize = sizeof nid;
-        nid.hWnd = platform.main_hwnd;
-        nid.uFlags = NIF_ICON | NIF_TIP;
-        // NOTE(uucidl): we decided against using the guid, as it disallows sharing the notification with multiple executables.. Once the GUID is registered, you cannot move/rename etc.. the executable.
-        // @url: https://blogs.msdn.microsoft.com/asklar/2012/03/06/system-tray-notification-area-icons/
-        if (false) {
-            nid.guidItem = {0x8a91e682, 0x35d3, 0x443e, { 0xa2, 0xda, 0x9f, 0x4a, 0x19, 0xfc, 0xe8, 0x66} };
-            nid.uFlags |= NIF_GUID;
-        } else {
-            nid.uID = 0x8a91e682;
-        }
-        StringCchCopy(nid.szTip, ARRAYSIZE(nid.szTip), L"UUFocus");
-        nid.uVersion = NOTIFYICON_VERSION_4;
-
+        NOTIFYICONDATA nid;
+        win32_notifyicon_make(&nid, platform);
+        auto name = global_application_name;
+        StringCchCopy(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), name);
         nid.uFlags |= NIF_INFO;
-        StringCchCopy(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), L"UUFocus");
+        StringCchCopy(nid.szTip, ARRAYSIZE(nid.szTip), name);
+        nid.uFlags |= NIF_TIP;
         StringCchCopy(nid.szInfo, ARRAYSIZE(nid.szInfo), content_first);
         nid.dwInfoFlags = NIIF_INFO|NIIF_RESPECT_QUIET_TIME;
 
         // Load the icon for high DPI.
-        comctl32.LoadIconMetric(nullptr, IDI_INFORMATION, LIM_SMALL, &nid.hIcon);
+        // comctl32.LoadIconMetric(nullptr, IDI_INFORMATION, LIM_SMALL, &nid.hIcon);
+        if (S_OK ==
+            comctl32.LoadIconMetric(GetModuleHandleW(nullptr),
+                                    IDI_APPLICATION, LIM_SMALL, &nid.hIcon)) {
+            nid.uFlags |= NIF_ICON;
+        }
 
-        shell32.Shell_NotifyIconW(NIM_DELETE, &nid);
         shell32.Shell_NotifyIconW(NIM_ADD, &nid);
         shell32.Shell_NotifyIconW(NIM_SETVERSION, &nid);
         shell32.Shell_NotifyIconW(NIM_MODIFY, &nid);
-        // TODO(uucidl): delete icon at destroy time
     }
 #endif
+}
+
+static void win32_platform_init(struct Platform* platform_, HWND hWnd)
+{
+    auto& platform = *platform_;
+    platform.main_hwnd = hWnd;
+}
+
+static void win32_platform_shutdown(struct Platform* platform_)
+{
+    auto const& shell32 = modules_shell32;
+    auto& platform = *platform_;
+    NOTIFYICONDATA nid;
+    win32_notifyicon_make(&nid, platform);
+    shell32.Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
 static THREAD_PROC(audio_thread_main)
@@ -561,8 +793,34 @@ static THREAD_PROC(audio_thread_main)
             reinterpret_cast<float*>(buffer.bytes_first),
             buffer.frame_count);
         win32_wasapi_sound_buffer_release(&global_sound, buffer);
+        if (global_sound.header.error == WasapiStreamError_Closed) {
+            if (win32_wasapi_sound_open_stereo(&global_sound, 48000)) {
+                global_sound.header.error = WasapiStreamError_Closed;
+            }
+        }
     }
     return 0;
+}
+
+#include <cstdarg>
+#include <cstdlib>
+
+static void win32_abort_with_message(char const* pattern, ...)
+{
+    const auto& kernel32 = modules_kernel32;
+    const auto& user32 = modules_user32;
+    va_list arglist;
+    va_start(arglist, pattern);
+    char buffer[4096];
+    auto buffer_n = std::vsnprintf(buffer, sizeof buffer, pattern, arglist);
+    if (buffer_n >= 0) {
+      wchar_t wbuffer[4096];
+      auto wbuffer_last = wbuffer +
+        kernel32.MultiByteToWideChar(CP_UTF8, 0, buffer, buffer_n, wbuffer, 4096);
+      *wbuffer_last = '\0';
+      user32.MessageBoxW(global_platform.main_hwnd, wbuffer, L"Defect", MB_OK);
+      std::abort();
+    }
 }
 
 #include "uu_focus_main.cpp"
@@ -574,5 +832,7 @@ static THREAD_PROC(audio_thread_main)
 #include "win32_comctl32.cpp"
 #include "win32_user32.cpp"
 #include "win32_shell32.cpp"
+#include "win32_gdi32.cpp"
 #include "win32_kernel32.cpp"
 
+// TODO(uucidl): DPI-awareness

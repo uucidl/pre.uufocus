@@ -37,6 +37,9 @@ struct UUFocusMainCoroutine
         std::uint64_t time_micros;
     } input;
 
+    // results:
+    unsigned int timer_elapsed_n; // wraps when reaching max
+
     // effects:
     struct AudioEffect *audio_effect;
     struct TimerEffect *timer_effect;
