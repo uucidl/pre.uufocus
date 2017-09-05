@@ -1,6 +1,7 @@
 // @language: c++14
 // @os: win32
 static const wchar_t* const global_application_name = L"UUFocus";
+static bool global_uiautomation_on = true;
 
 // Configuration:
 #define PLATFORM_NOTIFY_USE_MESSAGEBOX 0
@@ -52,6 +53,9 @@ static const wchar_t* const global_application_name = L"UUFocus";
 #include <dwrite.h>
 #pragma comment(lib, "dwrite.lib")
 
+#include <uiautomation.h>
+#pragma comment(lib, "uiautomationcore.lib")
+
 // Taskbar:
 // @url: https://msdn.microsoft.com/en-us/library/windows/desktop/dd378460(v=vs.85).aspx
 //
@@ -77,6 +81,7 @@ UU_FOCUS_GLOBAL WasapiStream global_sound;
 
 UU_FOCUS_GLOBAL ID2D1Factory *global_d2d1factory;
 UU_FOCUS_GLOBAL IDWriteFactory* global_dwritefactory;
+UU_FOCUS_GLOBAL IUIAutomation* global_UIAutomation;
 
 #if UU_FOCUS_INTERNAL
 
@@ -133,6 +138,12 @@ extern "C" int WINAPI WinMain(
             __uuidof(IDWriteFactory),
             reinterpret_cast<IUnknown**>(&global_dwritefactory));
         if (S_OK != hr) return 0xca'8e'b3'08; // "failed to create dwrite factory"
+    }
+    /* ui automation */ {
+        CoInitialize(nullptr);
+        auto hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER,
+                                   __uuidof(IUIAutomation), (void**)&global_UIAutomation);
+        if (S_OK != hr) return 0xf1'13'7b'ad; // "failed to obtain IUIAutomation"
     }
 
     auto &d2d1factory = *global_d2d1factory;
@@ -246,6 +257,8 @@ struct Ui
     uint64_t validity_end_micros;
 };
 
+static IRawElementProviderSimple* ui_root_automation_provider_get(HANDLE hWnd);
+
 static WIN32_WINDOW_PROC(main_window_proc)
 {
     UU_FOCUS_FN_STATE const UINT_PTR refresh_timer_id = 1;
@@ -335,6 +348,22 @@ static WIN32_WINDOW_PROC(main_window_proc)
             }
             if (now_micros() > ui.validity_end_micros) {
                 platform_render_async(&global_platform);
+            }
+        } break;
+
+        case WM_GETOBJECT: /* accessibility */ {
+            const auto dwObjId = (DWORD) lParam;
+            switch (dwObjId) {
+                static char const* msg;
+                case UiaRootObjectId: /* asking for an IUIAutomationProvider */ {
+                    msg = "Asking for IUIAutomationProvider for window\n";
+                    if (global_uiautomation_on) {
+                        auto rootProvider = ui_root_automation_provider_get(hWnd);
+                        if (rootProvider) {
+                            return UiaReturnRawElementProvider(hWnd, wParam, lParam, rootProvider);
+                        }
+                    }
+                } break;
             }
         } break;
     }
@@ -869,6 +898,212 @@ static THREAD_PROC(audio_thread_main)
         }
     }
     return 0;
+}
+
+// UI Automation & Accessibility
+//
+// @url: https://msdn.microsoft.com/en-us/library/windows/desktop/ee684009(v=vs.85).aspx
+// @quote{
+// Microsoft UI Automation is an accessibility framework that enables
+// Windows applications to provide and consume programmatic information
+// about user interfaces (UIs). It provides programmatic access to most
+// UI elements on the desktop. It enables assistive technology products,
+// such as screen readers, to provide information about the UI to end
+// users and to manipulate the UI by means other than standard input.
+// UI Automation also allows automated test scripts to interact with the UI.
+// }
+
+// UI Automation Provider
+// @url: https://msdn.microsoft.com/en-us/library/windows/desktop/ee671596(v=vs.85).aspx
+//
+// Tree where elements have parents, siblings and children.
+// Three such kinds (views) of trees are accessible: raw, control, content.
+// An element is either a control or content.
+//
+// Window (Framework) > FragmentRoot .. Fragments
+//
+
+// TODO(nicolas): basic protection against bad arguments in API calls,
+// like null pointers for return values
+
+struct RootUIAutomationProvider :
+  public IRawElementProviderSimple,
+  public IRawElementProviderFragment
+{
+    LONG reference_count = 0;
+    HWND hWnd;
+
+    RootUIAutomationProvider(HWND hWnd) : hWnd(hWnd) {}
+
+    // IUnknown:
+    ULONG STDMETHODCALLTYPE AddRef() override;
+    ULONG STDMETHODCALLTYPE Release() override;
+    HRESULT STDMETHODCALLTYPE QueryInterface(
+        REFIID riid, VOID **ppvInterface) override;
+
+    // IRawElementProviderSimple:
+    HRESULT get_ProviderOptions(ProviderOptions *pRetVal) override;
+    HRESULT get_HostRawElementProvider(IRawElementProviderSimple **) override;
+    HRESULT GetPatternProvider(
+        PATTERNID patternId, IUnknown  **pRetVal) override;
+    HRESULT GetPropertyValue(PROPERTYID,VARIANT *) override;
+
+    // IRawElementProviderFragment:
+    HRESULT GetEmbeddedFragmentRoots(SAFEARRAY **) override;
+    HRESULT GetRuntimeId(SAFEARRAY **) override;
+    HRESULT Navigate(NavigateDirection,IRawElementProviderFragment **) override;
+    HRESULT SetFocus(void) override;
+
+    HRESULT get_BoundingRectangle(UiaRect *) override;
+    HRESULT get_FragmentRoot(IRawElementProviderFragmentRoot **) override;
+};
+
+ULONG RootUIAutomationProvider::AddRef()
+{
+    return InterlockedIncrement(&reference_count);
+}
+
+ULONG RootUIAutomationProvider::Release()
+{
+    auto res = InterlockedDecrement(&reference_count);
+    if (res == 0) delete this;
+    return res;
+}
+
+HRESULT RootUIAutomationProvider::QueryInterface(REFIID riid, VOID **ppvInterface)
+{
+    if (__uuidof(IRawElementProviderSimple) == riid)
+    {
+        AddRef();
+        *ppvInterface = (IRawElementProviderSimple*)this;
+    }
+    else if (__uuidof(IRawElementProviderFragment) == riid)
+    {
+        AddRef();
+        *ppvInterface = (IRawElementProviderFragment*)this;
+    }
+    else
+    {
+        *ppvInterface = NULL;
+        return E_NOINTERFACE;
+    }
+    return S_OK;
+}
+
+HRESULT RootUIAutomationProvider::get_ProviderOptions(ProviderOptions *pRetVal)
+{
+    *pRetVal = ProviderOptions_ServerSideProvider;
+    return S_OK;
+}
+
+HRESULT RootUIAutomationProvider::get_HostRawElementProvider(IRawElementProviderSimple **pRetVal)
+{
+    return UiaHostProviderFromHwnd(hWnd, pRetVal);
+}
+
+HRESULT RootUIAutomationProvider::GetPatternProvider(
+  PATTERNID patternId,
+  IUnknown  **pRetVal)
+{
+    *pRetVal = nullptr; // the host provider will reply for us
+    return S_OK;
+}
+
+#include <OleAuto.h>
+#pragma comment(lib, "OleAut32.lib")
+
+HRESULT RootUIAutomationProvider::GetPropertyValue(
+  PROPERTYID propertyId,
+  VARIANT *pRetVal)
+{
+    if (propertyId == UIA_NamePropertyId)
+    {
+        pRetVal->vt = VT_BSTR;
+        pRetVal->bstrVal = SysAllocString(
+            L"UU Focus Main Window, Press LMB To Start Timer");
+    }
+    else if (propertyId == UIA_IsContentElementPropertyId)
+    {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->lVal = TRUE;
+    }
+    else
+    {
+        pRetVal->vt = VT_UNKNOWN;
+        UiaGetReservedNotSupportedValue(&pRetVal->punkVal);
+    }
+    return S_OK;
+}
+
+
+HRESULT RootUIAutomationProvider::GetEmbeddedFragmentRoots(SAFEARRAY **pArray)
+{
+    *pArray = NULL; // no other fragments contained
+    return S_OK;
+}
+
+HRESULT RootUIAutomationProvider::GetRuntimeId(SAFEARRAY ** pArray)
+{
+    // we are not a child, so we can return an id of null
+    *pArray = NULL;
+    return S_OK;
+}
+
+HRESULT RootUIAutomationProvider::Navigate(
+  NavigateDirection direction,
+  IRawElementProviderFragment **pRetVal)
+{
+    *pRetVal = nullptr;
+    switch (direction)
+    {
+        case NavigateDirection_Parent: {
+            // don't know my parent
+        } break;
+
+        case NavigateDirection_NextSibling:
+        case NavigateDirection_PreviousSibling:
+        {
+            // I have no siblings
+        } break;
+
+        case NavigateDirection_FirstChild:
+        case NavigateDirection_LastChild:
+        {
+            *pRetVal = nullptr; // I have no child right now, but soon!
+        } break;
+    }
+
+    *pRetVal = nullptr;
+    if (*pRetVal)
+    {
+        (*pRetVal)->AddRef();
+    }
+    return S_OK;
+}
+
+HRESULT RootUIAutomationProvider::SetFocus(void)
+{
+    return S_OK; // nothing to do
+}
+
+HRESULT RootUIAutomationProvider::get_BoundingRectangle(UiaRect *pRetVal)
+{
+    UiaRect NullRect{};
+    *pRetVal = NullRect; // get it from our host provider!
+    return S_OK;
+}
+
+HRESULT RootUIAutomationProvider::get_FragmentRoot(IRawElementProviderFragmentRoot **pRetVal)
+{
+    *pRetVal = nullptr;
+    return S_OK;
+}
+
+static IRawElementProviderSimple* ui_root_automation_provider_get(HANDLE hWnd)
+{
+    auto root_provider = new RootUIAutomationProvider(global_platform.main_hwnd);
+    root_provider->AddRef();
+    return root_provider;
 }
 
 #include <cstdarg>

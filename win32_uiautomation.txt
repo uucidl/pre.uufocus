@@ -1,0 +1,25 @@
+
+Debugging
+
+Inspect
+-------
+
+Inspect (Inspect.exe) is a Windows-based tool that enables you select any UI element and view the element's accessibility data. You can view Microsoft UI Automation properties and control patterns, as well as Microsoft Active Accessibility properties. Inspect also enables you to test the navigational structure of the automation elements in the UI Automation tree, and the accessible objects in the Microsoft Active Accessibility hierarchy.
+
+Inspect is installed with the Windows Software Development Kit (SDK) for Windows 8. (It is also available in previous versions of Windows SDK.) It is located in the \bin\<platform> folder of the SDK installation path (Inspect.exe).
+
+For example:
+C:\Program Files (x86)\Windows Kits\10\bin\10.0.15063.0\x64\inspect.exe
+
+AccScope
+--------
+
+@url: https://msdn.microsoft.com/en-us/library/dn433239(v=vs.85).aspx
+
+The AccScope tool enables developers and testers to evaluate the accessibility of their app during the app's development and design, rather than in the late testing phases of an app's development cycle. Testing can even start in early prototype phases. AccScope can visualize how a screen reader exposes the UI Automation information that an app provides, and can show areas where you might want to add info or support to your app to improve its accessibility.
+
+AccScope is installed with the Windows Software Development Kit (SDK). It is located in the \bin\<platform>\AccScope folder of the SDK installation path. Run the program AccScope.exe.
+
+For example:
+C:\Program Files (x86)\Windows Kits\10\bin\10.0.15063.0\x64\AccScope\accscope.exe
+
