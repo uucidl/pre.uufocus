@@ -926,6 +926,9 @@ static THREAD_PROC(audio_thread_main)
 // TODO(nicolas): basic protection against bad arguments in API calls,
 // like null pointers for return values
 
+// TODO(nicolas): construct/update fragment tree from the `ui` function
+// `d2d1_render` if and only if clients are listening.
+
 struct RootUIAutomationProvider :
   public IRawElementProviderSimple,
   public IRawElementProviderFragment
