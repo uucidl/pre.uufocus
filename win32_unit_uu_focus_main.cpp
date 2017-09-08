@@ -92,6 +92,7 @@ extern int global_palette_i;
 
 UU_FOCUS_GLOBAL win32_reloadable_modules::ReloadableModule global_ui_module;
 typedef UU_FOCUS_RENDER_UI_PROC(UUFocusRenderUIProc);
+UU_FOCUS_GLOBAL bool global_internal_ui_render_p;
 UU_FOCUS_GLOBAL UUFocusRenderUIProc *global_uu_focus_ui_render;
 #endif
 
@@ -251,11 +252,33 @@ static uint64_t now_micros()
 struct Ui;
 static void d2d1_render(HWND hwnd, Ui*);
 
+struct Float3 { float x, y, z; };
+struct Int2 { int x, y; };
+struct IntBox2 { Int2 min, max; };
+
 struct Ui
 {
     double validity_ms; // time to live for the produced frame
     uint64_t validity_end_micros;
+    // Unique component
+    struct
+    {
+        char const* id;
+        IntBox2 box;
+
+        char const* opaque_layer_id;
+        Float3 opaque_layer_background_color;
+
+        char* centered_text;
+        int centered_text_n;
+    } components;
+
+    char* text_data;
+    int text_data_i;
+    int text_data_n;
 };
+
+static void UiFree(Ui* ui_);
 
 static IRawElementProviderSimple* ui_root_automation_provider_get(HANDLE hWnd);
 
@@ -310,7 +333,10 @@ static WIN32_WINDOW_PROC(main_window_proc)
 
 #if UU_FOCUS_INTERNAL
         case WM_KEYDOWN: {
-            if (wParam == VK_RIGHT) {
+            if (wParam == 0x49 /* I */) {
+                bool &toggle = global_internal_ui_render_p;
+                toggle = !toggle;
+            } else if (wParam == VK_RIGHT) {
                 global_palette_i = (global_palette_i + 1) % global_palettes_n;
             } else {
                 global_audio_mode = (global_audio_mode + 1) % global_audio_mode_mod;
@@ -337,8 +363,9 @@ static WIN32_WINDOW_PROC(main_window_proc)
             ui.validity_ms = ui.validity_ms < 0.0? 0.0 : ui.validity_ms;
             ui.validity_end_micros = now_micros() + uint64_t(1000*ui.validity_ms);
             if (refresh_timer_id != user32.SetTimer(hWnd, refresh_timer_id, UINT(ui.validity_ms), NULL)) {
-              WIN32_ABORT("Could not SetTimer: %x", GetLastError());
+                WIN32_ABORT("Could not SetTimer: %x", GetLastError());
             }
+            UiFree(&ui);
         } break;
 
         case WM_TIMER: {
@@ -378,10 +405,14 @@ static WIN32_WINDOW_PROC(main_window_proc)
     return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
-struct Ui;
-static void welcome_render(ID2D1HwndRenderTarget* rt);
-static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt, Ui*);
-static void timer_end_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, Ui* ui_);
+static void UiNewFrame(Ui*);
+static void UiBeginRegion(Ui*, int width, int height, char const* id);
+static void UiEndRegion(Ui*, char const* id);
+static void UiPushCenteredText(Ui*, char const* utf8_string, char const* utf8_string_l, char const* id);
+static void UiBeginOpaqueLayer(Ui* ui_, float r, float g, float b, char const* id);
+static void UiEndOpaqueLayer(Ui* ui_, char const* id);
+
+static void uu_focus_ui_render(IntBox2 Box, Ui*);
 
 #if UU_FOCUS_INTERNAL
 static void internal_ui_render(ID2D1HwndRenderTarget* rt);
@@ -421,6 +452,8 @@ static void win32_set_background(WNDCLASSEX* window_class_)
     window_class.hbrBackground = bgbrush;
 }
 
+static void centered_text_render(ID2D1HwndRenderTarget* _rt, char const* text_first, char const* text_last);
+
 static void d2d1_render(HWND hwnd, Ui* ui_)
 {
     UU_FOCUS_FN_STATE HWND global_hwnd;
@@ -453,34 +486,30 @@ static void d2d1_render(HWND hwnd, Ui* ui_)
         global_client_height = height;
     }
 
+    uu_focus_ui_render(IntBox2{{0,0}, {width,height}}, &ui);
+
     auto &rt = *global_render_target;
     rt.BeginDraw();
-
-    auto &main = global_uu_focus_main;
-    auto palette_i = (global_palette_i + main.timer_elapsed_n)
-        % global_palettes_n;
-
-    if (!timer_is_active(main.timer_effect)) {
-        auto bg_color = global_palettes[palette_i].bg_off;
-        rt.Clear(D2D1::ColorF(bg_color[0], bg_color[1], bg_color[2], 1.0f));
-        if (main.timer_effect->start_time.hours == 0 && main.timer_effect->start_time.minutes == 0) {
-          welcome_render(&rt);
-        } else {
-          timer_end_render(*main.timer_effect, &rt, ui_);
-        }
-    } else /* timer is active */ {
-        auto bg_color = global_palettes[palette_i].bg_on;
-        rt.Clear(D2D1::ColorF(bg_color[0], bg_color[1], bg_color[2], 1.0f));
-        timer_render(*main.timer_effect, &rt, ui_);
+    {
+        auto const& col = ui.components.opaque_layer_background_color;
+        rt.Clear(D2D1::ColorF(col.x, col.y, col.z, 1.0f));
     }
+    centered_text_render(&rt,
+                         ui.components.centered_text,
+                         ui.components.centered_text + ui.components.centered_text_n);
 
 #if UU_FOCUS_INTERNAL
-    if (global_uu_focus_ui_render) {
+    if (global_uu_focus_ui_render && global_internal_ui_render_p) {
         global_uu_focus_ui_render(&rt, global_d2d1factory, global_dwritefactory);
         internal_ui_render(&rt);
+        if (UiaClientsAreListening()) {
+            /* are we connected to UI Automation? */
+            auto t = "hello ui automation";
+            auto t_l = t + strlen(t);
+            centered_text_render(&rt, t, t_l);
+        }
     }
 #endif
-
     hr = rt.EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) {
         rt.Release();
@@ -573,7 +602,7 @@ static char* string_push_double(char* dst_first,
 static constexpr const auto global_ui_welcome_string = "Press LMB to start timer.";
 
 
-static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, char* text_last)
+static void centered_text_render(ID2D1HwndRenderTarget* _rt, char const* text_first, char const* text_last)
 {
     UU_FOCUS_FN_STATE IDWriteTextFormat *global_text_format;
     auto &dwrite = *global_dwritefactory;
@@ -620,7 +649,7 @@ static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, c
     fg_brush->Release();
 }
 
-static void welcome_render(ID2D1HwndRenderTarget* _rt)
+static void welcome_render(Ui* ui)
 {
     enum { MAX_TEXT_SIZE = 100 };
     char text[MAX_TEXT_SIZE];
@@ -628,10 +657,10 @@ static void welcome_render(ID2D1HwndRenderTarget* _rt)
     auto text_last = text;
     text_last = string_push_zstring(
         text_last, text_end, global_ui_welcome_string);
-    centered_text_render(_rt, text, text_last);
+    UiPushCenteredText(ui, text, text_last, "welcome");
 }
 
-static void timer_end_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, Ui* ui_)
+static void timer_end_render(TimerEffect const& timer, Ui* ui)
 {
     enum { MAX_TEXT_SIZE = 100 };
     char text[MAX_TEXT_SIZE];
@@ -652,10 +681,10 @@ static void timer_end_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt
 
       text_last = rc;
     }
-    centered_text_render(rt_, text, text_last);
+    UiPushCenteredText(ui, text, text_last, "welcome");
 }
 
-static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, Ui* ui_)
+static void timer_render(TimerEffect const& timer, Ui* ui_)
 {
     auto &ui = *ui_;
 
@@ -701,8 +730,39 @@ static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, U
       text_last = rc;
     }
 
-    centered_text_render(rt_, text, text_last);
+    UiPushCenteredText(&ui, text, text_last, "timer_msg");
 }
+
+static void uu_focus_ui_render(IntBox2 Box, Ui* ui_)
+{
+    auto& ui = *ui_;
+    UiBeginRegion(&ui,
+                  Box.max.x - Box.min.x,
+                  Box.max.y - Box.min.y, "main frame");
+
+    auto &main = global_uu_focus_main;
+    auto palette_i = (global_palette_i + main.timer_elapsed_n)
+        % global_palettes_n;
+
+    if (!timer_is_active(main.timer_effect)) {
+        auto bg_color = global_palettes[palette_i].bg_off;
+        UiBeginOpaqueLayer(&ui, bg_color[0], bg_color[1], bg_color[2], "main-layer");
+        if (main.timer_effect->start_time.hours == 0 && main.timer_effect->start_time.minutes == 0) {
+          welcome_render(&ui);
+        } else {
+          timer_end_render(*main.timer_effect, &ui);
+        }
+        UiEndOpaqueLayer(&ui, "main-layer");
+
+    } else /* timer is active */ {
+        auto bg_color = global_palettes[palette_i].bg_on;
+        UiBeginOpaqueLayer(&ui, bg_color[0], bg_color[1], bg_color[2], "main-layer");
+        timer_render(*main.timer_effect, &ui);
+        UiEndOpaqueLayer(&ui, "main-layer");
+    }
+    UiEndRegion(&ui, "main frame");
+}
+
 
 #if UU_FOCUS_INTERNAL
 static void internal_ui_render(ID2D1HwndRenderTarget* rt_)
@@ -776,6 +836,64 @@ static void internal_ui_render(ID2D1HwndRenderTarget* rt_)
 }
 #endif
 
+#include <cassert>
+
+static void UiFree(Ui* ui_)
+{
+    auto &ui = *ui_;
+    free(ui.text_data);
+    ui = {};
+}
+
+static void UiNewFrame(Ui* ui_)
+{
+    auto &ui = *ui_;
+    ui.components = {};
+}
+
+static void UiBeginRegion(Ui* ui_, int width, int height, char const* id)
+{
+    auto &d = ui_->components;
+    assert(!d.id);
+    d.id = id;
+    d.box.min = { 0, 0 };
+    d.box.max = { width, height };
+}
+
+static void UiEndRegion(Ui* ui_, char const* id)
+{
+    auto const &d = ui_->components;
+    assert(0 == strcmp(d.id, id));
+}
+
+static void UiBeginOpaqueLayer(Ui* ui_, float r, float g, float b, char const* id)
+{
+    auto &d = ui_->components;
+    assert(!d.opaque_layer_id);
+    d.opaque_layer_background_color = Float3{r, g, b};
+    d.opaque_layer_id = id;
+}
+
+static void UiEndOpaqueLayer(Ui* ui_, char const* id)
+{
+    auto const &d = ui_->components;
+    assert(0 == strcmp(d.opaque_layer_id, id));
+}
+
+static void UiPushCenteredText(Ui* ui_, char const* utf8_string, char const* utf8_string_l, char const* id)
+{
+    auto &ui = *ui_;
+    auto &d = ui_->components;
+    int need_n = (int)(utf8_string_l - utf8_string);
+    if (ui.text_data_i + need_n > ui.text_data_n) {
+        ui.text_data = (char*)realloc(ui.text_data, 2*(ui.text_data_i + need_n));
+    }
+    auto const p = ui.text_data + ui.text_data_i;
+    auto const p_n = need_n;
+    memcpy(p, utf8_string, p_n);
+    d.centered_text = p;
+    d.centered_text_n = p_n;
+}
 
 #include <cassert>
 
@@ -934,9 +1052,15 @@ struct RootUIAutomationProvider :
   public IRawElementProviderFragment
 {
     LONG reference_count = 0;
-    HWND hWnd;
+    HWND hWnd = nullptr;
+    Ui ui = {};
+    uint64_t ui_validity_micros = 0; // absolute time where the ui is invalid
 
     RootUIAutomationProvider(HWND hWnd) : hWnd(hWnd) {}
+    ~RootUIAutomationProvider()
+    {
+        UiFree(&ui);
+    }
 
     // IUnknown:
     ULONG STDMETHODCALLTYPE AddRef() override;
@@ -1056,6 +1180,18 @@ HRESULT RootUIAutomationProvider::Navigate(
   NavigateDirection direction,
   IRawElementProviderFragment **pRetVal)
 {
+    auto const micros = now_micros();
+    if (micros >= ui_validity_micros)
+    {
+        auto const& user32 = modules_user32;
+        RECT rc;
+        user32.GetClientRect(hWnd, &rc);
+
+        UiNewFrame(&ui);
+        uu_focus_ui_render(IntBox2{{rc.left,rc.top}, {rc.right,rc.bottom}}, &ui);
+        ui_validity_micros = micros + static_cast<uint64_t>(ui.validity_ms * 1000);
+    }
+
     *pRetVal = nullptr;
     switch (direction)
     {
