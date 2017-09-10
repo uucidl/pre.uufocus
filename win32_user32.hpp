@@ -75,6 +75,15 @@ struct user32
 
     ATOM (WINAPI *RegisterClassExW)(_In_ const WNDCLASSEXW *lpwcx);
 
+    BOOL (WINAPI *SetWindowPos)(
+        _In_     HWND hWnd,
+        _In_opt_ HWND hWndInsertAfter,
+        _In_     int  X,
+        _In_     int  Y,
+        _In_     int  cx,
+        _In_     int  cy,
+        _In_     UINT uFlags);
+
     BOOL (WINAPI *ShowWindow)(
         HWND hWnd,
         int nCmdShow);

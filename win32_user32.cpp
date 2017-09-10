@@ -21,6 +21,7 @@ user32 LoadUser32(kernel32 const& kernel32)
         E(PostQuitMessage);
         E(RegisterClassExW);
         E(SetTimer);
+        E(SetWindowPos);
         E(ShowWindow);
         E(TranslateMessage);
         E(UpdateWindow);

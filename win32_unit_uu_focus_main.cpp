@@ -63,7 +63,7 @@ static bool global_uiautomation_on = true;
 // @url: https://msdn.microsoft.com/en-us/library/windows/desktop/ee330740(v=vs.85).aspx
 
 static WIN32_WINDOW_PROC(main_window_proc);
-static uint64_t now_micros();
+static WIN32_WINDOW_PROC(child_window_proc);
 
 UU_FOCUS_GLOBAL kernel32 modules_kernel32;
 UU_FOCUS_GLOBAL user32 modules_user32;
@@ -159,24 +159,37 @@ extern "C" int WINAPI WinMain(
 
     WNDCLASSEXW main_class = {};
     {
-        main_class.cbSize = sizeof(main_class);
-        main_class.style = CS_VREDRAW | CS_HREDRAW;
-        main_class.lpfnWndProc = main_window_proc;
-        main_class.lpszClassName = L"uu_focus";
-        main_class.hIcon = (HICON)user32.LoadImageW(
+        auto &d = main_class;
+        d.cbSize = sizeof(d);
+        d.style = CS_VREDRAW | CS_HREDRAW;
+        d.lpfnWndProc = main_window_proc;
+        d.lpszClassName = L"uu_focus";
+        d.hIcon = (HICON)user32.LoadImageW(
             GetModuleHandle(nullptr),
             IDI_APPLICATION,
             IMAGE_ICON,
             0, 0, LR_DEFAULTSIZE);
-        if (!main_class.hIcon) {
+        if (!d.hIcon) {
             return GetLastError();
         }
-        win32_set_background(&main_class); // avoid flashing white at ShowWindow
+        win32_set_background(&d); // avoid flashing white at ShowWindow
     }
     user32.RegisterClassExW(&main_class);
+
+    WNDCLASSEXW child_class = {};
+    {
+        auto &d = child_class;
+        d.cbSize = sizeof(d);
+        d.style = CS_HREDRAW | CS_VREDRAW;
+        d.lpfnWndProc = child_window_proc;
+        d.lpszClassName = L"uu_focus_child";
+        win32_set_background(&d); // avoid flashing white at ShowWindow
+    }
+    user32.RegisterClassExW(&child_class);
+
     HWND main_hwnd = {};
     {
-        DWORD window_style = WS_OVERLAPPEDWINDOW;
+        DWORD window_style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
         RECT window_rect = {};
         window_rect.right = 600;
         window_rect.bottom = 200;
@@ -200,18 +213,12 @@ extern "C" int WINAPI WinMain(
         error = kernel32.GetLastError();
         return error;
     }
-    user32.ShowWindow(main_hwnd, nCmdShow);
-
     modules_shell32 = LoadShell32(kernel32);
     modules_comctl32 = LoadComctl32(kernel32);
 
     auto& sound = global_sound;
-<<<<<<< HEAD
-    // NOTE(nicolas): dependency between the pink noise filter and 44.1khz
-    win32_wasapi_sound_open_stereo(&sound, 44100); // TODO(nicolas): how about opening/closing on demand
-=======
+    // NOTE(nicolas): dependency between the pink noise filter and 48khz
     win32_wasapi_sound_open_stereo(&sound, 48000); // TODO(uucidl): how about opening/closing on demand
->>>>>>> Desperately trying to get Uia to show our document provider
     if (sound.header.error == WasapiStreamError_Success)
     {
         global_sound_thread = kernel32.CreateThread(
@@ -284,15 +291,69 @@ struct Ui
 
 static void UiFree(Ui* ui_);
 
-static IRawElementProviderSimple* ui_root_automation_provider_get(HANDLE hWnd);
+static IRawElementProviderSimple* ui_root_automation_provider_get(HWND);
 
 static WIN32_WINDOW_PROC(main_window_proc)
 {
-    UU_FOCUS_FN_STATE const UINT_PTR refresh_timer_id = 1;
-    UU_FOCUS_FN_STATE Ui ui;
-
-    auto &main = global_uu_focus_main;
+    UU_FOCUS_FN_STATE HWND child_window;
     auto const& user32 = modules_user32;
+    auto &main = global_uu_focus_main;
+
+    switch (uMsg) {
+        case WM_CREATE: {
+            // init
+            win32_platform_init(&global_platform, hWnd);
+
+            RECT rc;
+            user32.GetClientRect(hWnd, &rc);
+
+            child_window = user32.CreateWindowExW(
+                /* dwExStyle */ 0,
+                L"uu_focus_child",
+                L"Main",
+                WS_CHILD | WS_VISIBLE,
+                /* x */ 0,
+                /* y */ 0,
+                /* nWidth */ rc.right - rc.left,
+                /* nHeight */ rc.bottom - rc.top,
+                hWnd,
+                /* hMenu */ NULL,
+                /* hInstance */ NULL,
+                /* lpParam */ NULL);
+        } break;
+
+        case WM_DESTROY: {
+            main.input.command.type = Command_application_stop;
+            uu_focus_main(&main);
+            user32.PostQuitMessage(0);
+        } break;
+
+        case WM_ERASEBKGND: { return 0; } break;
+
+        case WM_SIZE: {
+            RECT rc;
+            user32.GetClientRect(hWnd, &rc);
+            user32.SetWindowPos(
+                child_window, NULL, rc.left, rc.top, rc.right, rc.bottom,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+        } break;
+    }
+#if UU_FOCUS_INTERNAL
+    if (win32_reloadable_modules::has_changed(&global_ui_module)) {
+        auto reload_attempt = load(&global_ui_module);
+        address_assign(&global_uu_focus_ui_render, (HMODULE)global_ui_module.dll,
+                       "win32_uu_focus_ui_render");
+        platform_render_async(&global_platform);
+    }
+#endif
+    return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam);
+}
+
+static WIN32_WINDOW_PROC(child_window_proc)
+{
+    static const UINT_PTR refresh_timer_id = 1;
+    auto const& user32 = modules_user32;
+    auto &main = global_uu_focus_main;
     main.input.command = {};
     main.input.time_micros = now_micros();
 
@@ -300,11 +361,9 @@ static WIN32_WINDOW_PROC(main_window_proc)
         main.timer_effect->now_micros = now_micros();
     }
 
-    switch (uMsg) {
+    switch (uMsg)
+    {
         case WM_CREATE: {
-            // init
-            win32_platform_init(&global_platform, hWnd);
-
             auto &main_state = global_uu_focus_main;
             main_state.timer_effect = timer_make(&global_platform);
             main_state.input.command = {};
@@ -317,12 +376,7 @@ static WIN32_WINDOW_PROC(main_window_proc)
 #endif
         } break;
 
-        case WM_DESTROY: {
-            user32.KillTimer(hWnd, refresh_timer_id);
-            main.input.command.type = Command_application_stop;
-            uu_focus_main(&main);
-            user32.PostQuitMessage(0);
-        } break;
+        case WM_ERASEBKGND: { return 0; } break;
 
         case WM_LBUTTONDOWN: {
             main.input.command.type = Command_timer_start;
@@ -330,12 +384,30 @@ static WIN32_WINDOW_PROC(main_window_proc)
             auto timer_period_ms = 60;
         } break;
 
+        case WM_PAINT: {
+            Ui ui = {};
+            ui.validity_ms = 1e6;
+            d2d1_render(hWnd, &ui);
+            ui.validity_ms = ui.validity_ms < 0.0? 0.0 : ui.validity_ms;
+            if (refresh_timer_id != user32.SetTimer(hWnd, refresh_timer_id, UINT(ui.validity_ms), NULL)) {
+                WIN32_ABORT("Could not SetTimer: %x", GetLastError());
+            }
+            UiFree(&ui);
+        } break;
+
         case WM_RBUTTONDOWN: {
             main.input.command.type = Command_timer_stop;
             uu_focus_main(&main);
         } break;
 
-#if UU_FOCUS_INTERNAL
+        case WM_TIMER: {
+            uu_focus_main(&main);
+            if (!timer_is_active(main.timer_effect)) {
+                user32.KillTimer(hWnd, refresh_timer_id);
+            }
+        } break;
+
+        #if UU_FOCUS_INTERNAL
         case WM_KEYDOWN: {
             if (wParam == 0x49 /* I */) {
                 bool &toggle = global_internal_ui_render_p;
@@ -361,53 +433,29 @@ static WIN32_WINDOW_PROC(main_window_proc)
         } break;
 #endif
 
-        case WM_PAINT: {
-            ui.validity_ms = 1e6;
-            d2d1_render(hWnd, &ui);
-            ui.validity_ms = ui.validity_ms < 0.0? 0.0 : ui.validity_ms;
-            ui.validity_end_micros = now_micros() + uint64_t(1000*ui.validity_ms);
-            if (refresh_timer_id != user32.SetTimer(hWnd, refresh_timer_id, UINT(ui.validity_ms), NULL)) {
-                WIN32_ABORT("Could not SetTimer: %x", GetLastError());
-            }
-            UiFree(&ui);
-        } break;
-
-        case WM_TIMER: {
-            uu_focus_main(&main);
-            if (!timer_is_active(main.timer_effect)) {
-                user32.KillTimer(hWnd, refresh_timer_id);
-            }
-            if (now_micros() > ui.validity_end_micros) {
-                platform_render_async(&global_platform);
-            }
-        } break;
-
+        static char const* msg;
         case WM_GETOBJECT: /* accessibility */ {
             const auto dwObjId = (DWORD) lParam;
             switch (dwObjId) {
-                static char const* msg;
                 case UiaRootObjectId: /* asking for an IUIAutomationProvider */ {
                     msg = "Asking for IUIAutomationProvider for window\n";
                     if (global_uiautomation_on) {
                         auto rootProvider = ui_root_automation_provider_get(hWnd);
                         if (rootProvider) {
-                            return UiaReturnRawElementProvider(hWnd, wParam, lParam, rootProvider);
+                            auto result = UiaReturnRawElementProvider(
+                                hWnd, wParam, lParam, rootProvider);
+                            rootProvider->Release();
+                            return result;
                         }
                     }
                 } break;
             }
         } break;
     }
-#if UU_FOCUS_INTERNAL
-    if (win32_reloadable_modules::has_changed(&global_ui_module)) {
-        auto reload_attempt = load(&global_ui_module);
-        address_assign(&global_uu_focus_ui_render, (HMODULE)global_ui_module.dll,
-                       "win32_uu_focus_ui_render");
-        platform_render_async(&global_platform);
-    }
-#endif
+
     return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam);
-}
+};
+
 
 static void UiNewFrame(Ui*);
 static void UiBeginRegion(Ui*, int width, int height, char const* id);
@@ -1120,12 +1168,16 @@ struct TextUIAutomationProvider :
 {
     LONG reference_count = 0;
     com_shared<IRawElementProviderFragment> parent_fragment_provider;
+    com_shared<IRawElementProviderFragmentRoot> parent_fragment_root_provider;
     com_shared<UIAutomationUI> shared_ui_snapshot;
 
     TextUIAutomationProvider(com_shared<UIAutomationUI> snapshot,
-                             com_shared<IRawElementProviderFragment> parent)
+                             com_shared<IRawElementProviderFragment> parent,
+                             com_shared<IRawElementProviderFragmentRoot> parent_root)
         : shared_ui_snapshot(snapshot),
-          parent_fragment_provider(parent) {}
+          parent_fragment_provider(parent),
+          parent_fragment_root_provider(parent_root)
+    {}
 
     ULONG AddRef() override
     {
@@ -1223,30 +1275,32 @@ HRESULT TextUIAutomationProvider::GetPropertyValue(
   VARIANT *pRetVal)
 {
     auto const& ui = shared_ui_snapshot->ui;
-    if (propertyId == UIA_NamePropertyId)
-    {
+
+    pRetVal->vt = VT_EMPTY;
+    if (propertyId == UIA_NamePropertyId) {
         pRetVal->vt = VT_BSTR;
         pRetVal->bstrVal = alloc_ole_string_from_utf8_small(
             ui.components.centered_text, ui.components.centered_text_n);
-    }
-    else if (propertyId == UIA_IsContentElementPropertyId)
-    {
+    } else if (propertyId == UIA_AutomationIdPropertyId) {
+        pRetVal->vt = VT_BSTR;
+        pRetVal->bstrVal = SysAllocString(L"Text");
+    } else if (propertyId == UIA_IsContentElementPropertyId) {
         pRetVal->vt = VT_BOOL;
-        pRetVal->lVal = TRUE;
-    }
-    else if (propertyId == UIA_ProviderDescriptionPropertyId)
-    {
+        pRetVal->boolVal = VARIANT_TRUE;
+    } else if (propertyId == UIA_ProviderDescriptionPropertyId) {
         pRetVal->bstrVal = SysAllocString(L"UU: Uia Text");
         if (pRetVal->bstrVal != NULL)
         {
             pRetVal->vt = VT_BSTR;
         }
+    } else if (propertyId == UIA_IsKeyboardFocusablePropertyId) {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->boolVal = VARIANT_FALSE;
+    } else if (propertyId == UIA_HasKeyboardFocusPropertyId) {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->boolVal = VARIANT_FALSE;
     }
-    else
-    {
-        pRetVal->vt = VT_UNKNOWN;
-        UiaGetReservedNotSupportedValue(&pRetVal->punkVal);
-    }
+
     return S_OK;
 }
 
@@ -1284,7 +1338,7 @@ HRESULT TextUIAutomationProvider::Navigate(
         case NavigateDirection_FirstChild:
         case NavigateDirection_LastChild:
         {
-            *pRetVal = nullptr;
+            // Nor children
         } break;
     }
 
@@ -1310,7 +1364,8 @@ HRESULT TextUIAutomationProvider::get_BoundingRectangle(UiaRect *pRetVal)
 
 HRESULT TextUIAutomationProvider::get_FragmentRoot(IRawElementProviderFragmentRoot **pRetVal)
 {
-    *pRetVal = nullptr;
+    *pRetVal = &(*parent_fragment_root_provider);
+    (*pRetVal)->AddRef();
     return S_OK;
 }
 
@@ -1371,25 +1426,18 @@ ULONG RootUIAutomationProvider::Release()
 HRESULT RootUIAutomationProvider::QueryInterface(REFIID riid, VOID **ppvInterface)
 {
     void *pInterface = nullptr;
-    if (__uuidof(IRawElementProviderSimple) == riid)
-    {
+    if (__uuidof(IRawElementProviderSimple) == riid) {
         pInterface = (IRawElementProviderSimple*)this;
-    }
-    else if (__uuidof(IRawElementProviderFragment) == riid)
-    {
+    } else if (__uuidof(IRawElementProviderFragment) == riid) {
         pInterface = (IRawElementProviderFragment*)this;
-    }
-    else if (__uuidof(IRawElementProviderFragmentRoot) == riid)
-    {
+    } else if (__uuidof(IRawElementProviderFragmentRoot) == riid) {
         pInterface = (IRawElementProviderFragmentRoot*)this;
-    }
-
-    *ppvInterface = pInterface;
-    if (!pInterface)
-    {
+    } else {
+        *ppvInterface = nullptr;
         return E_NOINTERFACE;
     }
 
+    *ppvInterface = pInterface;
     AddRef();
     return S_OK;
 }
@@ -1420,34 +1468,35 @@ HRESULT RootUIAutomationProvider::GetPropertyValue(
   PROPERTYID propertyId,
   VARIANT *pRetVal)
 {
-    if (propertyId == UIA_PaneControlTypeId)
-    {
+    pRetVal->vt = VT_EMPTY;
+
+    if (propertyId == UIA_NamePropertyId) {
+        pRetVal->vt = VT_BSTR;
+        pRetVal->bstrVal = SysAllocString(L"Main Pane");
+    } else if (propertyId == UIA_ControlTypePropertyId) {
         pRetVal->vt = VT_I4;
         pRetVal->lVal = UIA_PaneControlTypeId;
-    }
-    else if (propertyId == UIA_NamePropertyId)
-    {
+    } else if (propertyId == UIA_AutomationIdPropertyId) {
         pRetVal->vt = VT_BSTR;
-        pRetVal->bstrVal = SysAllocString(
-            L"UU Focus Main Window, Press LMB To Start Timer");
-    }
-    else if (propertyId == UIA_IsContentElementPropertyId)
-    {
+        pRetVal->bstrVal = SysAllocString(L"RootControl");
+    } else if (propertyId == UIA_IsControlElementPropertyId) {
         pRetVal->vt = VT_BOOL;
-        pRetVal->lVal = TRUE;
-    }
-    else if (propertyId == UIA_ProviderDescriptionPropertyId)
-    {
+        pRetVal->boolVal = VARIANT_TRUE;
+    } else if (propertyId == UIA_IsContentElementPropertyId) {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->boolVal = VARIANT_TRUE;
+    } else if (propertyId == UIA_ProviderDescriptionPropertyId) {
         pRetVal->bstrVal = SysAllocString(L"UU: Uia Root");
         if (pRetVal->bstrVal != NULL)
         {
             pRetVal->vt = VT_BSTR;
         }
-    }
-    else
-    {
-        pRetVal->vt = VT_UNKNOWN;
-        UiaGetReservedNotSupportedValue(&pRetVal->punkVal);
+    } else if (propertyId == UIA_IsKeyboardFocusablePropertyId) {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->boolVal = VARIANT_FALSE;
+    } else if (propertyId == UIA_HasKeyboardFocusPropertyId) {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->boolVal = VARIANT_FALSE;
     }
     return S_OK;
 }
@@ -1500,43 +1549,31 @@ HRESULT RootUIAutomationProvider::Navigate(
         case NavigateDirection_LastChild:
         {
             *pRetVal = new TextUIAutomationProvider(
-                shared_ui_snapshot, com_shared<IRawElementProviderFragment>(this));
+                shared_ui_snapshot,
+                com_shared<IRawElementProviderFragment>(this),
+                com_shared<IRawElementProviderFragmentRoot>(this));
+            (*pRetVal)->AddRef();
         } break;
-    }
-
-    if (*pRetVal)
-    {
-        (*pRetVal)->AddRef();
     }
     return S_OK;
 }
 
 HRESULT RootUIAutomationProvider::SetFocus(void)
 {
-    return S_OK; // nothing to do
+    return UIA_E_INVALIDOPERATION;
 }
 
 HRESULT RootUIAutomationProvider::get_BoundingRectangle(UiaRect *pRetVal)
 {
     UiaRect NullRect{};
     *pRetVal = NullRect; // get it from our host provider!
-
-    auto const& user32 = modules_user32;
-    RECT rc;
-    if (!user32.GetClientRect(hWnd, &rc))
-    {
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-    pRetVal->left = rc.left;
-    pRetVal->top = rc.top;
-    pRetVal->width = rc.right - rc.left;
-    pRetVal->height = rc.bottom - rc.top;
     return S_OK;
 }
 
 HRESULT RootUIAutomationProvider::get_FragmentRoot(IRawElementProviderFragmentRoot **pRetVal)
 {
-    *pRetVal = nullptr;
+    *pRetVal = this;
+    AddRef();
     return S_OK;
 }
 
@@ -1545,22 +1582,24 @@ HRESULT RootUIAutomationProvider::ElementProviderFromPoint(double x, double y,
 {
     // TODO(uucidl): @copypaste
     *pRetVal = new TextUIAutomationProvider(
-        shared_ui_snapshot, com_shared<IRawElementProviderFragment>(this));
+        shared_ui_snapshot,
+        com_shared<IRawElementProviderFragment>(this),
+        com_shared<IRawElementProviderFragmentRoot>(this));
+    (*pRetVal)->AddRef();
     return S_OK;
 }
 
 HRESULT RootUIAutomationProvider::GetFocus(IRawElementProviderFragment **pRetVal)
 {
     // TODO(uucidl): @copypaste
-    *pRetVal = new TextUIAutomationProvider(
-        shared_ui_snapshot, com_shared<IRawElementProviderFragment>(this));
+    *pRetVal = NULL;
     return S_OK;
 }
 
 
-static IRawElementProviderSimple* ui_root_automation_provider_get(HANDLE hWnd)
+static IRawElementProviderSimple* ui_root_automation_provider_get(HWND hWnd)
 {
-    auto root_provider = new RootUIAutomationProvider(global_platform.main_hwnd);
+    auto root_provider = new RootUIAutomationProvider(hWnd);
     root_provider->AddRef();
     return root_provider;
 }
@@ -1600,3 +1639,4 @@ static void win32_abort_with_message(char const* pattern, ...)
 
 // TODO(uucidl): DPI-awareness
 // TODO(uucidl): create a document child window, seems to be the only way to set our UiAutomationProviders correctly
+// @url: https://github.com/Microsoft/Windows-classic-samples/blob/master/Samples/UIAutomationDocumentProvider/cpp/UiaDocumentProvider.cpp

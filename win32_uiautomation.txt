@@ -1,6 +1,12 @@
 
 Debugging
 
+VisualUIAVerifyNative.exe
+-------------------------
+
+Helps validating the UI Automation Elements work as expected
+by the spec.
+
 Inspect
 -------
 
