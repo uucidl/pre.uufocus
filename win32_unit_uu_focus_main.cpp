@@ -206,8 +206,12 @@ extern "C" int WINAPI WinMain(
     modules_comctl32 = LoadComctl32(kernel32);
 
     auto& sound = global_sound;
+<<<<<<< HEAD
     // NOTE(nicolas): dependency between the pink noise filter and 44.1khz
     win32_wasapi_sound_open_stereo(&sound, 44100); // TODO(nicolas): how about opening/closing on demand
+=======
+    win32_wasapi_sound_open_stereo(&sound, 48000); // TODO(uucidl): how about opening/closing on demand
+>>>>>>> Desperately trying to get Uia to show our document provider
     if (sound.header.error == WasapiStreamError_Success)
     {
         global_sound_thread = kernel32.CreateThread(
@@ -486,6 +490,7 @@ static void d2d1_render(HWND hwnd, Ui* ui_)
         global_client_height = height;
     }
 
+    UiNewFrame(&ui);
     uu_focus_ui_render(IntBox2{{0,0}, {width,height}}, &ui);
 
     auto &rt = *global_render_target;
@@ -849,6 +854,7 @@ static void UiNewFrame(Ui* ui_)
 {
     auto &ui = *ui_;
     ui.components = {};
+    ui.text_data_i = 0;
 }
 
 static void UiBeginRegion(Ui* ui_, int width, int height, char const* id)
@@ -1041,26 +1047,285 @@ static THREAD_PROC(audio_thread_main)
 // Window (Framework) > FragmentRoot .. Fragments
 //
 
-// TODO(nicolas): basic protection against bad arguments in API calls,
+// TODO(uucidl): basic protection against bad arguments in API calls,
 // like null pointers for return values
 
-// TODO(nicolas): construct/update fragment tree from the `ui` function
+// TODO(uucidl): construct/update fragment tree from the `ui` function
 // `d2d1_render` if and only if clients are listening.
 
-struct RootUIAutomationProvider :
+template <typename T>
+// T models IUnknown
+struct com_shared
+{
+    T* raw_ptr;
+    HANDLE debug_thread_id = 0;
+
+    com_shared(com_shared const& other) : com_shared(other.raw_ptr) {}
+    explicit com_shared(T* x) : raw_ptr(x) { raw_ptr->AddRef(); }
+    ~com_shared() { raw_ptr->Release(); }
+
+    T& operator* ()
+    {
+        HANDLE thread_id = GetCurrentThread();
+        if (!debug_thread_id) {
+            debug_thread_id = thread_id;
+        } else {
+            assert(debug_thread_id == thread_id);
+        }
+        return *raw_ptr;
+    }
+
+    T* operator-> ()
+    {
+        T& ref = **this;
+        return &ref;
+    }
+};
+
+// UI tree kept for use by UIAutomation
+struct UIAutomationUI : public IUnknown
+{
+    LONG reference_count = 0;
+    Ui ui = {};
+    uint64_t ui_validity_micros = 0; // absolute time where the ui is invalid
+
+    ~UIAutomationUI() { UiFree(&ui); }
+
+    ULONG AddRef() override
+    {
+        return InterlockedIncrement(&reference_count);
+    }
+
+    ULONG Release() override
+    {
+        auto res = InterlockedDecrement(&reference_count);
+        if (res == 0) delete this;
+        return res;
+    };
+
+    HRESULT QueryInterface(REFIID riid, VOID **ppvInterface) override
+    {
+        *ppvInterface = NULL;
+        return E_NOINTERFACE;
+    }
+};
+
+// TODO(uucidl): synthesize com objects from a generic tree description. If
+// HTML can do it, why can't we? There should be no application specific
+// knowledge in these platform specific classes.
+
+struct TextUIAutomationProvider :
   public IRawElementProviderSimple,
   public IRawElementProviderFragment
 {
     LONG reference_count = 0;
-    HWND hWnd = nullptr;
-    Ui ui = {};
-    uint64_t ui_validity_micros = 0; // absolute time where the ui is invalid
+    com_shared<IRawElementProviderFragment> parent_fragment_provider;
+    com_shared<UIAutomationUI> shared_ui_snapshot;
 
-    RootUIAutomationProvider(HWND hWnd) : hWnd(hWnd) {}
-    ~RootUIAutomationProvider()
+    TextUIAutomationProvider(com_shared<UIAutomationUI> snapshot,
+                             com_shared<IRawElementProviderFragment> parent)
+        : shared_ui_snapshot(snapshot),
+          parent_fragment_provider(parent) {}
+
+    ULONG AddRef() override
     {
-        UiFree(&ui);
+        return InterlockedIncrement(&reference_count);
     }
+
+    ULONG Release() override
+    {
+        auto res = InterlockedDecrement(&reference_count);
+        if (res == 0) delete this;
+        return res;
+    };
+
+    HRESULT QueryInterface(REFIID riid, VOID **ppvInterface) override
+    {
+        if (__uuidof(IRawElementProviderSimple) == riid)
+        {
+            AddRef();
+            *ppvInterface = (IRawElementProviderSimple*)this;
+        }
+
+        *ppvInterface = NULL;
+        return E_NOINTERFACE;
+    }
+
+    // IRawElementProviderSimple:
+    HRESULT get_ProviderOptions(ProviderOptions *pRetVal) override;
+    HRESULT get_HostRawElementProvider(IRawElementProviderSimple **) override;
+    HRESULT GetPatternProvider(
+        PATTERNID patternId, IUnknown  **pRetVal) override;
+    HRESULT GetPropertyValue(PROPERTYID,VARIANT *) override;
+
+    // IRawElementProviderFragment:
+    HRESULT GetEmbeddedFragmentRoots(SAFEARRAY **) override;
+    HRESULT GetRuntimeId(SAFEARRAY **) override;
+    HRESULT Navigate(NavigateDirection,IRawElementProviderFragment **) override;
+    HRESULT SetFocus(void) override;
+
+    HRESULT get_BoundingRectangle(UiaRect *) override;
+    HRESULT get_FragmentRoot(IRawElementProviderFragmentRoot **) override;
+};
+
+HRESULT TextUIAutomationProvider::get_ProviderOptions(ProviderOptions *pRetVal)
+{
+    *pRetVal = ProviderOptions_ServerSideProvider;
+    return S_OK;
+}
+
+HRESULT TextUIAutomationProvider::get_HostRawElementProvider(IRawElementProviderSimple **pRetVal)
+{
+    *pRetVal = NULL;
+    return S_OK;
+}
+
+HRESULT TextUIAutomationProvider::GetPatternProvider(
+  PATTERNID patternId,
+  IUnknown  **pRetVal)
+{
+#if TODO_DISABLED
+    // TODO(uucidl): that's strange no? How could text be invokable
+    public IInvokeProvider
+
+    if (UIA_InvokePatternId == patternId)
+    {
+        AddRef();
+        *pRetVal = static_cast<IInvokeProvider*>(
+            const_cast<TextUIAutomationProvider*>(this));
+        return S_OK;
+    }
+#endif
+    *pRetVal = nullptr; // the host provider will reply for us
+    return S_OK;
+}
+
+static BSTR alloc_ole_string_from_utf8_small(char const *utf8_chars, int utf8_chars_n)
+{
+    enum { MAX_TEXT_SIZE = 100 };
+    wchar_t result_text[MAX_TEXT_SIZE];
+    auto const result_text_n =
+        MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        utf8_chars,
+        utf8_chars_n,
+        result_text,
+        MAX_TEXT_SIZE);
+    return SysAllocStringLen(result_text, result_text_n);
+}
+
+#include <OleAuto.h>
+#pragma comment(lib, "OleAut32.lib")
+
+HRESULT TextUIAutomationProvider::GetPropertyValue(
+  PROPERTYID propertyId,
+  VARIANT *pRetVal)
+{
+    auto const& ui = shared_ui_snapshot->ui;
+    if (propertyId == UIA_NamePropertyId)
+    {
+        pRetVal->vt = VT_BSTR;
+        pRetVal->bstrVal = alloc_ole_string_from_utf8_small(
+            ui.components.centered_text, ui.components.centered_text_n);
+    }
+    else if (propertyId == UIA_IsContentElementPropertyId)
+    {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->lVal = TRUE;
+    }
+    else if (propertyId == UIA_ProviderDescriptionPropertyId)
+    {
+        pRetVal->bstrVal = SysAllocString(L"UU: Uia Text");
+        if (pRetVal->bstrVal != NULL)
+        {
+            pRetVal->vt = VT_BSTR;
+        }
+    }
+    else
+    {
+        pRetVal->vt = VT_UNKNOWN;
+        UiaGetReservedNotSupportedValue(&pRetVal->punkVal);
+    }
+    return S_OK;
+}
+
+
+HRESULT TextUIAutomationProvider::GetEmbeddedFragmentRoots(SAFEARRAY **pArray)
+{
+    *pArray = NULL; // no other fragments contained
+    return S_OK;
+}
+
+HRESULT TextUIAutomationProvider::GetRuntimeId(SAFEARRAY ** pArray)
+{
+    // we are not a child, so we can return an id of null
+    *pArray = NULL;
+    return S_OK;
+}
+
+HRESULT TextUIAutomationProvider::Navigate(
+  NavigateDirection direction,
+  IRawElementProviderFragment **pRetVal)
+{
+    *pRetVal = nullptr;
+    switch (direction)
+    {
+        case NavigateDirection_Parent: {
+            *pRetVal = &(*parent_fragment_provider);
+        } break;
+
+        case NavigateDirection_NextSibling:
+        case NavigateDirection_PreviousSibling:
+        {
+            // I have no siblings
+        } break;
+
+        case NavigateDirection_FirstChild:
+        case NavigateDirection_LastChild:
+        {
+            *pRetVal = nullptr;
+        } break;
+    }
+
+    *pRetVal = nullptr;
+    if (*pRetVal)
+    {
+        (*pRetVal)->AddRef();
+    }
+    return S_OK;
+}
+
+HRESULT TextUIAutomationProvider::SetFocus(void)
+{
+    return S_OK; // nothing to do
+}
+
+HRESULT TextUIAutomationProvider::get_BoundingRectangle(UiaRect *pRetVal)
+{
+    UiaRect NullRect{};
+    *pRetVal = NullRect; // get it from our host provider!
+    return S_OK;
+}
+
+HRESULT TextUIAutomationProvider::get_FragmentRoot(IRawElementProviderFragmentRoot **pRetVal)
+{
+    *pRetVal = nullptr;
+    return S_OK;
+}
+
+struct RootUIAutomationProvider :
+  public IRawElementProviderSimple,
+  public IRawElementProviderFragment,
+  public IRawElementProviderFragmentRoot
+{
+    LONG reference_count = 0;
+    HWND hWnd = nullptr;
+    com_shared<UIAutomationUI> shared_ui_snapshot;
+
+    RootUIAutomationProvider(HWND hWnd)
+        : hWnd(hWnd),
+          shared_ui_snapshot(new UIAutomationUI) {}
 
     // IUnknown:
     ULONG STDMETHODCALLTYPE AddRef() override;
@@ -1083,6 +1348,12 @@ struct RootUIAutomationProvider :
 
     HRESULT get_BoundingRectangle(UiaRect *) override;
     HRESULT get_FragmentRoot(IRawElementProviderFragmentRoot **) override;
+
+    // IRawElementProviderFragmentRoot:
+    HRESULT ElementProviderFromPoint(double x, double y,
+        IRawElementProviderFragment **pRetVal);
+    HRESULT GetFocus(IRawElementProviderFragment **pRetVal);
+
 };
 
 ULONG RootUIAutomationProvider::AddRef()
@@ -1099,21 +1370,27 @@ ULONG RootUIAutomationProvider::Release()
 
 HRESULT RootUIAutomationProvider::QueryInterface(REFIID riid, VOID **ppvInterface)
 {
+    void *pInterface = nullptr;
     if (__uuidof(IRawElementProviderSimple) == riid)
     {
-        AddRef();
-        *ppvInterface = (IRawElementProviderSimple*)this;
+        pInterface = (IRawElementProviderSimple*)this;
     }
     else if (__uuidof(IRawElementProviderFragment) == riid)
     {
-        AddRef();
-        *ppvInterface = (IRawElementProviderFragment*)this;
+        pInterface = (IRawElementProviderFragment*)this;
     }
-    else
+    else if (__uuidof(IRawElementProviderFragmentRoot) == riid)
     {
-        *ppvInterface = NULL;
+        pInterface = (IRawElementProviderFragmentRoot*)this;
+    }
+
+    *ppvInterface = pInterface;
+    if (!pInterface)
+    {
         return E_NOINTERFACE;
     }
+
+    AddRef();
     return S_OK;
 }
 
@@ -1143,7 +1420,12 @@ HRESULT RootUIAutomationProvider::GetPropertyValue(
   PROPERTYID propertyId,
   VARIANT *pRetVal)
 {
-    if (propertyId == UIA_NamePropertyId)
+    if (propertyId == UIA_PaneControlTypeId)
+    {
+        pRetVal->vt = VT_I4;
+        pRetVal->lVal = UIA_PaneControlTypeId;
+    }
+    else if (propertyId == UIA_NamePropertyId)
     {
         pRetVal->vt = VT_BSTR;
         pRetVal->bstrVal = SysAllocString(
@@ -1153,6 +1435,14 @@ HRESULT RootUIAutomationProvider::GetPropertyValue(
     {
         pRetVal->vt = VT_BOOL;
         pRetVal->lVal = TRUE;
+    }
+    else if (propertyId == UIA_ProviderDescriptionPropertyId)
+    {
+        pRetVal->bstrVal = SysAllocString(L"UU: Uia Root");
+        if (pRetVal->bstrVal != NULL)
+        {
+            pRetVal->vt = VT_BSTR;
+        }
     }
     else
     {
@@ -1181,15 +1471,16 @@ HRESULT RootUIAutomationProvider::Navigate(
   IRawElementProviderFragment **pRetVal)
 {
     auto const micros = now_micros();
-    if (micros >= ui_validity_micros)
+    auto &ui_snapshot = *shared_ui_snapshot;
+    if (micros >= ui_snapshot.ui_validity_micros)
     {
         auto const& user32 = modules_user32;
         RECT rc;
         user32.GetClientRect(hWnd, &rc);
 
-        UiNewFrame(&ui);
-        uu_focus_ui_render(IntBox2{{rc.left,rc.top}, {rc.right,rc.bottom}}, &ui);
-        ui_validity_micros = micros + static_cast<uint64_t>(ui.validity_ms * 1000);
+        UiNewFrame(&ui_snapshot.ui);
+        uu_focus_ui_render(IntBox2{{rc.left,rc.top}, {rc.right,rc.bottom}}, &ui_snapshot.ui);
+        ui_snapshot.ui_validity_micros = micros + static_cast<uint64_t>(ui_snapshot.ui.validity_ms * 1000);
     }
 
     *pRetVal = nullptr;
@@ -1208,11 +1499,11 @@ HRESULT RootUIAutomationProvider::Navigate(
         case NavigateDirection_FirstChild:
         case NavigateDirection_LastChild:
         {
-            *pRetVal = nullptr; // I have no child right now, but soon!
+            *pRetVal = new TextUIAutomationProvider(
+                shared_ui_snapshot, com_shared<IRawElementProviderFragment>(this));
         } break;
     }
 
-    *pRetVal = nullptr;
     if (*pRetVal)
     {
         (*pRetVal)->AddRef();
@@ -1229,6 +1520,17 @@ HRESULT RootUIAutomationProvider::get_BoundingRectangle(UiaRect *pRetVal)
 {
     UiaRect NullRect{};
     *pRetVal = NullRect; // get it from our host provider!
+
+    auto const& user32 = modules_user32;
+    RECT rc;
+    if (!user32.GetClientRect(hWnd, &rc))
+    {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    pRetVal->left = rc.left;
+    pRetVal->top = rc.top;
+    pRetVal->width = rc.right - rc.left;
+    pRetVal->height = rc.bottom - rc.top;
     return S_OK;
 }
 
@@ -1237,6 +1539,24 @@ HRESULT RootUIAutomationProvider::get_FragmentRoot(IRawElementProviderFragmentRo
     *pRetVal = nullptr;
     return S_OK;
 }
+
+HRESULT RootUIAutomationProvider::ElementProviderFromPoint(double x, double y,
+                                 IRawElementProviderFragment **pRetVal)
+{
+    // TODO(uucidl): @copypaste
+    *pRetVal = new TextUIAutomationProvider(
+        shared_ui_snapshot, com_shared<IRawElementProviderFragment>(this));
+    return S_OK;
+}
+
+HRESULT RootUIAutomationProvider::GetFocus(IRawElementProviderFragment **pRetVal)
+{
+    // TODO(uucidl): @copypaste
+    *pRetVal = new TextUIAutomationProvider(
+        shared_ui_snapshot, com_shared<IRawElementProviderFragment>(this));
+    return S_OK;
+}
+
 
 static IRawElementProviderSimple* ui_root_automation_provider_get(HANDLE hWnd)
 {
@@ -1279,3 +1599,4 @@ static void win32_abort_with_message(char const* pattern, ...)
 #include "win32_kernel32.cpp"
 
 // TODO(uucidl): DPI-awareness
+// TODO(uucidl): create a document child window, seems to be the only way to set our UiAutomationProviders correctly
