@@ -29,6 +29,52 @@ struct DocumentTree
     int parts_n;
 };
 
+#include <uiautomation.h>
+#pragma comment(lib, "uiautomationcore.lib")
+
+#include <assert.h>
+
+// Glue between document & Uia
+struct DocumentPartProvider : public IRawElementProviderSimple, public IRawElementProviderFragment, public IRawElementProviderFragmentRoot
+{
+    LONG reference_count;
+    HWND hwnd;
+    DocumentTree* document_tree_;
+    int part_i;
+
+    // IUnknown
+    ULONG AddRef() override
+    {
+        ++reference_count;
+        return reference_count;
+    }
+
+    ULONG Release() override
+    {
+        assert(reference_count > 0);
+        --reference_count;
+        if (!reference_count) delete this;
+    }
+
+    HRESULT QueryInterface(REFIID riid, VOID **ppvInterface) override
+    {
+        *ppvInterface = nullptr;
+        if (__uuidof(IRawElementProviderSimple) == riid) {
+            *ppvInterface = static_cast<IRawElementProviderSimple*>(this);
+        } else if (__uuidof(IRawElementProviderFragment) == riid) {
+            *ppvInterface = static_cast<IRawElementProviderFragment*>(this);
+        } else if (__uuidof(IRawElementProviderFragmentRoot) == riid) {
+            if (part_i == 0) {
+                *ppvInterface = static_cast<IRawElementProviderFragmentRoot*>(this);
+            }
+        }
+
+        if (!*ppvInterface) return E_NOINTERFACE;
+        this->AddRef();
+        return S_OK;
+    }
+};
+
 static DocumentTree global_document;
 
 static void demo_document_init(DocumentTree* document_tree_)
