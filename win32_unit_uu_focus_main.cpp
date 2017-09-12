@@ -1195,14 +1195,19 @@ struct TextUIAutomationProvider :
 
     HRESULT QueryInterface(REFIID riid, VOID **ppvInterface) override
     {
+        *ppvInterface = NULL;
         if (__uuidof(IRawElementProviderSimple) == riid)
         {
             AddRef();
             *ppvInterface = (IRawElementProviderSimple*)this;
         }
-
-        *ppvInterface = NULL;
-        return E_NOINTERFACE;
+        else if (__uuidof(IRawElementProviderFragment) == riid)
+        {
+            AddRef();
+            *ppvInterface = (IRawElementProviderFragment*)this;
+        }
+        if (!*ppvInterface) return E_NOINTERFACE;
+        return S_OK;
     }
 
     // IRawElementProviderSimple:
