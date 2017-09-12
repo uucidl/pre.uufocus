@@ -191,9 +191,11 @@ extern "C" int WINAPI WinMain(
     {
         DWORD window_style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
         RECT window_rect = {};
-        window_rect.right = 600;
-        window_rect.bottom = 200;
-        user32.AdjustWindowRect(&window_rect, window_style, /*bMenu*/false);
+        {
+            window_rect.right = 600;
+            window_rect.bottom = 200;
+            user32.AdjustWindowRect(&window_rect, window_style, /*bMenu*/false);
+        }
         main_hwnd = user32.CreateWindowExW(
             DWORD{0},
             main_class.lpszClassName,
@@ -1222,7 +1224,7 @@ struct TextUIAutomationProvider :
 
 HRESULT TextUIAutomationProvider::get_ProviderOptions(ProviderOptions *pRetVal)
 {
-    *pRetVal = ProviderOptions_ServerSideProvider;
+    *pRetVal = ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading;
     return S_OK;
 }
 
@@ -1248,7 +1250,7 @@ HRESULT TextUIAutomationProvider::GetPatternProvider(
         return S_OK;
     }
 #endif
-    *pRetVal = nullptr; // the host provider will reply for us
+    *pRetVal = nullptr;
     return S_OK;
 }
 
@@ -1277,7 +1279,10 @@ HRESULT TextUIAutomationProvider::GetPropertyValue(
     auto const& ui = shared_ui_snapshot->ui;
 
     pRetVal->vt = VT_EMPTY;
-    if (propertyId == UIA_NamePropertyId) {
+    if (propertyId == UIA_ControlTypePropertyId) {
+        pRetVal->vt = VT_I4;
+        pRetVal->lVal = UIA_TextControlTypeId;
+    } else if (propertyId == UIA_NamePropertyId) {
         pRetVal->vt = VT_BSTR;
         pRetVal->bstrVal = alloc_ole_string_from_utf8_small(
             ui.components.centered_text, ui.components.centered_text_n);
@@ -1287,12 +1292,12 @@ HRESULT TextUIAutomationProvider::GetPropertyValue(
     } else if (propertyId == UIA_IsContentElementPropertyId) {
         pRetVal->vt = VT_BOOL;
         pRetVal->boolVal = VARIANT_TRUE;
+    } else if (propertyId == UIA_IsControlElementPropertyId) {
+        pRetVal->vt = VT_BOOL;
+        pRetVal->boolVal = VARIANT_TRUE;
     } else if (propertyId == UIA_ProviderDescriptionPropertyId) {
+        pRetVal->vt = VT_BSTR;
         pRetVal->bstrVal = SysAllocString(L"UU: Uia Text");
-        if (pRetVal->bstrVal != NULL)
-        {
-            pRetVal->vt = VT_BSTR;
-        }
     } else if (propertyId == UIA_IsKeyboardFocusablePropertyId) {
         pRetVal->vt = VT_BOOL;
         pRetVal->boolVal = VARIANT_FALSE;
@@ -1313,8 +1318,15 @@ HRESULT TextUIAutomationProvider::GetEmbeddedFragmentRoots(SAFEARRAY **pArray)
 
 HRESULT TextUIAutomationProvider::GetRuntimeId(SAFEARRAY ** pArray)
 {
-    // we are not a child, so we can return an id of null
-    *pArray = NULL;
+    int rId[] = { UiaAppendRuntimeId, -1 };
+    int rId_n = 2;
+    SAFEARRAY* sa = SafeArrayCreateVector(VT_I4, 0, rId_n);
+    LONG d_i = 0;
+    SafeArrayPutElement(sa, &d_i, (void*)&rId[0]);
+    ++d_i;
+    SafeArrayPutElement(sa, &d_i, (void*)&rId[1]);
+    ++d_i;
+    *pArray = sa;
     return S_OK;
 }
 
@@ -1342,7 +1354,6 @@ HRESULT TextUIAutomationProvider::Navigate(
         } break;
     }
 
-    *pRetVal = nullptr;
     if (*pRetVal)
     {
         (*pRetVal)->AddRef();
@@ -1357,9 +1368,7 @@ HRESULT TextUIAutomationProvider::SetFocus(void)
 
 HRESULT TextUIAutomationProvider::get_BoundingRectangle(UiaRect *pRetVal)
 {
-    UiaRect NullRect{};
-    *pRetVal = NullRect; // get it from our host provider!
-    return S_OK;
+    return (*parent_fragment_provider).get_BoundingRectangle(pRetVal);
 }
 
 HRESULT TextUIAutomationProvider::get_FragmentRoot(IRawElementProviderFragmentRoot **pRetVal)
@@ -1444,7 +1453,7 @@ HRESULT RootUIAutomationProvider::QueryInterface(REFIID riid, VOID **ppvInterfac
 
 HRESULT RootUIAutomationProvider::get_ProviderOptions(ProviderOptions *pRetVal)
 {
-    *pRetVal = ProviderOptions_ServerSideProvider;
+    *pRetVal = ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading;
     return S_OK;
 }
 
