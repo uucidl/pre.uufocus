@@ -24,6 +24,10 @@ echo TEST	test_uu_focus_exe
 	exit /b %ERRORLEVEL%
 )
 
+cl -DWIN32_UI_ACCESS_MAIN -Fe%BuildDir%\demo_ui_access.exe ^
+  win32_ui_access.cpp ^
+  -Od -EHsc -Z7 -W3 -Fo%BuildObjDir%\ -nologo
+
 REM Build program:
 REM
 
