@@ -2,16 +2,36 @@
 
 #if defined(WIN32_UI_ACCESS_MAIN)
 
+// The document tree is meant to represent the UI's structure to assist
+// fast navigation, offer access to its content as well as its controls.
+
 #define UNICODE
 #include <windows.h>
 #pragma comment(lib, "user32.lib")
 
+enum ReadingLayout
+{
+    ReadingLayout_LeftToRight,
+    ReadingLayout_RightToLeft,
+    ReadingLayout_TopDown,
+};
+
+struct Float32_2
+{
+    float x, y;
+};
+
+struct Float32Box2
+{
+    Float32_2 min, max;
+};
+
 struct Content
 {
-    int min_x, min_y;
-    int max_x, max_y;
+    Float32Box2 box;
     char const* text_utf8;
     int text_utf8_n;
+    ReadingLayout orientation;
 };
 
 struct DocumentPart
@@ -32,17 +52,77 @@ struct DocumentTree
 #include <uiautomation.h>
 #pragma comment(lib, "uiautomationcore.lib")
 
+#include <windows.h>
+#pragma comment(lib, "user32.lib")
+
+#include <OleAuto.h>
+#pragma comment(lib, "OleAut32.lib")
+
 #include <assert.h>
 
-// Glue between document & Uia
-struct DocumentPartProvider : public IRawElementProviderSimple, public IRawElementProviderFragment, public IRawElementProviderFragmentRoot
+static Float32Box2 physical_screen_from_logical_window(HWND hwnd,
+                                                       Float32Box2 box)
 {
-    LONG reference_count;
+    POINT points[] = {
+        { (LONG)box.min.x, (LONG)box.min.y },
+        { (LONG)box.max.x, (LONG)box.max.y }
+    };
+    // TODO(uucidl): @sloppy error handling
+    MapWindowPoints(hwnd, HWND_DESKTOP, points, /* point count */ 2);
+    LogicalToPhysicalPoint(hwnd, &points[0]);
+    LogicalToPhysicalPoint(hwnd, &points[1]);
+    return {
+        { (float)points[0].x, (float)points[0].y },
+        { (float)points[1].x, (float)points[1].y }
+    };
+}
+
+static void to_VT_R8_ARRAY(Float32Box2 box, VARIANT* d_)
+{
+    auto &d = *d_;
+    // TODO(uucidl): @sloppy error handling
+    auto sa = SafeArrayCreateVector(VT_R8, 0, 4);
+    LONG d_i;
+    d_i = 0;
+    SafeArrayPutElement(sa, &d_i, (void*)&box.min.x); ++d_i;
+    SafeArrayPutElement(sa, &d_i, (void*)&box.min.y); ++d_i;
+    SafeArrayPutElement(sa, &d_i, (void*)&box.max.x); ++d_i;
+    SafeArrayPutElement(sa, &d_i, (void*)&box.max.y); ++d_i;
+    d.vt = VT_R8 | VT_ARRAY;
+    d.parray = sa;
+}
+
+static void to_BSTR_from_small(char const* utf8, int utf8_n, VARIANT* d_)
+{
+    auto &d = *d_;
+    // TODO(uucidl): @sloppy error handling
+    enum { MAX_TEXT_SIZE = 100 };
+    wchar_t result_text[MAX_TEXT_SIZE];
+    auto const result_text_n =
+        MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        utf8,
+        utf8_n,
+        result_text,
+        MAX_TEXT_SIZE);
+    auto bstr = SysAllocStringLen(result_text, result_text_n);
+    d.vt = VT_BSTR;
+    d.bstrVal = bstr;
+}
+
+// Glue between document & Uia
+struct DocumentPartProvider
+: public IRawElementProviderSimple
+, public IRawElementProviderFragment
+, public IRawElementProviderFragmentRoot
+{
+    LONG reference_count = 0;
     HWND hwnd;
     DocumentTree* document_tree_;
     int part_i;
 
-    // IUnknown
+    // IUnknown:
     ULONG AddRef() override
     {
         ++reference_count;
@@ -54,6 +134,7 @@ struct DocumentPartProvider : public IRawElementProviderSimple, public IRawEleme
         assert(reference_count > 0);
         --reference_count;
         if (!reference_count) delete this;
+        return reference_count;
     }
 
     HRESULT QueryInterface(REFIID riid, VOID **ppvInterface) override
@@ -73,7 +154,193 @@ struct DocumentPartProvider : public IRawElementProviderSimple, public IRawEleme
         this->AddRef();
         return S_OK;
     }
+
+    // IRawElementProviderSimple:
+    HRESULT get_ProviderOptions(ProviderOptions *pRetVal) override
+    {
+        *pRetVal = ProviderOptions_ServerSideProvider
+            | ProviderOptions_UseComThreading;
+        return S_OK;
+    }
+
+    HRESULT get_HostRawElementProvider(IRawElementProviderSimple **pRetVal) override
+    {
+        if (this->part_i == 0) return UiaHostProviderFromHwnd(this->hwnd, pRetVal);
+        *pRetVal = nullptr;
+        return S_OK;
+    }
+
+    HRESULT GetPatternProvider(
+        PATTERNID patternId, IUnknown  **pRetVal) override
+    {
+        *pRetVal = nullptr;
+        return S_OK;
+    }
+
+    HRESULT GetPropertyValue(PROPERTYID propertyId, VARIANT *pRetVal) override
+    {
+        auto &result = *pRetVal;
+        result.vt = VT_EMPTY;
+
+        auto const& document = *this->document_tree_;
+        auto const& part_i = this->part_i;
+        auto const& content = document.parts[part_i].content;
+        switch (propertyId)
+        {
+            case UIA_BoundingRectanglePropertyId: {
+                auto const box = physical_screen_from_logical_window(
+                    hwnd,
+                    content.box);
+                to_VT_R8_ARRAY(box, &result);
+            } break;
+
+            case UIA_NamePropertyId: {
+                if (part_i == 0) to_BSTR_from_small("root", 4, &result);
+                else {
+                    to_BSTR_from_small(
+                        content.text_utf8, content.text_utf8_n, &result);
+                }
+            } break;
+        }
+        return S_OK;
+    }
+
+    // IRawElementProviderFragment:
+    HRESULT GetEmbeddedFragmentRoots(SAFEARRAY **ppArray) override
+    {
+        *ppArray = nullptr;
+        return S_OK;
+    }
+
+    HRESULT GetRuntimeId(SAFEARRAY **ppArray) override
+    {
+        auto const& part_i = this->part_i;
+        if (part_i == 0) *ppArray = nullptr;
+        else {
+            int rId[] = { UiaAppendRuntimeId, -1 };
+            int rId_n = 2;
+            SAFEARRAY* sa = SafeArrayCreateVector(VT_I4, 0, rId_n);
+            LONG d_i = 0;
+            SafeArrayPutElement(sa, &d_i, (void*)&rId[0]);
+            ++d_i;
+            SafeArrayPutElement(sa, &d_i, (void*)&rId[1]);
+            ++d_i;
+            *ppArray = sa;
+        }
+        return S_OK;
+    }
+
+    HRESULT Navigate(NavigateDirection direction, IRawElementProviderFragment **pRetVal) override
+    {
+        *pRetVal = nullptr;
+
+        auto const& document = *this->document_tree_;
+        auto const& part_i = this->part_i;
+        auto const& part = document.parts[part_i];
+
+        int other_part_i = DocumentTree::MAX_PART_N;
+        switch (direction)
+        {
+            case NavigateDirection_NextSibling:
+            case NavigateDirection_PreviousSibling:
+            case NavigateDirection_Parent:
+            {
+                if (part_i > 0) {
+                    int parent_part_i = 0;
+                    int siblings_f = 0;
+                    int siblings_l = 0;
+                    for (auto const part : document.parts) {
+                        siblings_f = part.children_index_first;
+                        siblings_l = part.children_index_last;
+                        if (part_i >=  siblings_f &&
+                            part_i < siblings_l)
+                        {
+                            break;
+                        }
+                        ++parent_part_i;
+                    }
+                    assert(parent_part_i < DocumentTree::MAX_PART_N);
+
+                    auto const& parent_part = document.parts[parent_part_i];
+                    if (NavigateDirection_Parent == direction) {
+                        other_part_i = parent_part_i;
+                    } else if (NavigateDirection_NextSibling == direction) {
+                        if (part_i + 1 < siblings_l) {
+                            other_part_i = part_i + 1;
+                        }
+                    } else if (NavigateDirection_PreviousSibling == direction) {
+                        if (part_i > siblings_f) {
+                            other_part_i = part_i - 1;
+                        }
+                    }
+                }
+            } break;
+
+            case NavigateDirection_FirstChild: {
+                if (part.children_index_first != part.children_index_last) {
+                    other_part_i = part.children_index_first;
+                }
+            } break;
+
+            case NavigateDirection_LastChild: {
+                if (part.children_index_first != part.children_index_last) {
+                    other_part_i = part.children_index_last - 1;
+                }
+            } break;
+        }
+
+        if (other_part_i != DocumentTree::MAX_PART_N) {
+            auto provider = new DocumentPartProvider();
+            provider->hwnd = this->hwnd;
+            provider->document_tree_ = this->document_tree_;
+            provider->part_i = other_part_i;
+            provider->AddRef();
+            *pRetVal = provider;
+        }
+        return S_OK;
+    }
+
+    HRESULT SetFocus(void) override;
+
+    HRESULT get_BoundingRectangle(UiaRect *) override;
+    HRESULT get_FragmentRoot(IRawElementProviderFragmentRoot **) override;
+
+    // IRawElementProviderFragmentRoot:
+    HRESULT ElementProviderFromPoint(double x, double y,
+                                     IRawElementProviderFragment **pRetVal);
+    HRESULT GetFocus(IRawElementProviderFragment **pRetVal);
+
 };
+
+static LRESULT UiAccessWindowProc(DocumentTree* document_,
+                                  HWND hWnd,
+                                  UINT uMsg,
+                                  WPARAM wParam,
+                                  LPARAM lParam)
+{
+    switch (uMsg)
+    {
+        case WM_GETOBJECT: {
+            const auto objectId = static_cast<DWORD>(lParam);
+            switch (objectId) {
+                case UiaRootObjectId: {
+                    auto provider = new DocumentPartProvider();
+                    provider->hwnd = hWnd;
+                    provider->document_tree_ = document_;
+                    provider->part_i = 0;
+                    provider->AddRef();
+                    auto result = UiaReturnRawElementProvider(
+                        hWnd, wParam, lParam, provider);
+                    provider->Release();
+                    return result;
+                } break;
+            }
+        } break;
+    }
+
+    return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+}
+
 
 static DocumentTree global_document;
 
@@ -108,28 +375,28 @@ static void demo_document_init(DocumentTree* document_tree_)
 
 static void document_layout_horizontal_split(DocumentTree* document_tree_,
                                   int parts_f, int parts_l,
-                                  int min_x, int min_y,
-                                  int max_x, int max_y)
+                                  float min_x, float min_y,
+                                  float max_x, float max_y)
 {
     DocumentTree& document = *document_tree_;
-    double x = min_x;
-    double divisor = parts_l - parts_f;
-    double x_inc = (max_x - min_x) / divisor;
+    float x = min_x;
+    float divisor = (float)(parts_l - parts_f);
+    float x_inc = (max_x - min_x) / divisor;
     for (auto parts_i = parts_f; parts_i != parts_l; ++parts_i) {
         auto part_min_x = x;
         auto part_max_x = x + x_inc;
         auto &part = document.parts[parts_i];
-        part.content.min_x = static_cast<int>(part_min_x);
-        part.content.max_x = static_cast<int>(part_max_x);
-        part.content.min_y = min_y;
-        part.content.max_y = max_y;
+        part.content.box.min.x = part_min_x;
+        part.content.box.max.x = part_max_x;
+        part.content.box.min.y = min_y;
+        part.content.box.max.y = max_y;
         document_layout_horizontal_split(&document,
                                          part.children_index_first,
                                          part.children_index_last,
-                                         part.content.min_x,
-                                         part.content.min_y,
-                                         part.content.max_x,
-                                         part.content.max_y);
+                                         part.content.box.min.x,
+                                         part.content.box.min.y,
+                                         part.content.box.max.x,
+                                         part.content.box.max.y);
         x += x_inc;
     }
 }
@@ -138,10 +405,10 @@ static void demo_document_layout(DocumentTree* document_tree_, int width, int he
 {
     DocumentTree& document = *document_tree_;
 
-    auto min_x = 0;
-    auto min_y = 0;
-    auto max_x = width;
-    auto max_y = height;
+    auto min_x = 0.0f;
+    auto min_y = 0.0f;
+    auto max_x = float(width);
+    auto max_y = float(height);
 
     document_layout_horizontal_split(&document,
                                      0, 1,
@@ -164,7 +431,7 @@ static LRESULT main_window_proc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             demo_document_layout(&global_document, width, height);
         } break;
     }
-    return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+    return UiAccessWindowProc(&global_document, hWnd, uMsg, wParam, lParam);
 }
 
 
