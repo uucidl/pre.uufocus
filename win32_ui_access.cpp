@@ -195,11 +195,8 @@ struct DocumentPartProvider
             } break;
 
             case UIA_NamePropertyId: {
-                if (part_i == 0) to_BSTR_from_small("root", 4, &result);
-                else {
-                    to_BSTR_from_small(
-                        content.text_utf8, content.text_utf8_n, &result);
-                }
+                to_BSTR_from_small(
+                    content.text_utf8, content.text_utf8_n, &result);
             } break;
         }
         return S_OK;
@@ -290,6 +287,7 @@ struct DocumentPartProvider
         }
 
         if (other_part_i != DocumentTree::MAX_PART_N) {
+            // TODO(nil): @copypasta
             auto provider = new DocumentPartProvider();
             provider->hwnd = this->hwnd;
             provider->document_tree_ = this->document_tree_;
@@ -300,16 +298,54 @@ struct DocumentPartProvider
         return S_OK;
     }
 
-    HRESULT SetFocus(void) override;
+    HRESULT SetFocus(void) override
+    {
+        // TODO(nil): focus support
+        return S_OK;
+    }
 
-    HRESULT get_BoundingRectangle(UiaRect *) override;
-    HRESULT get_FragmentRoot(IRawElementProviderFragmentRoot **) override;
+    HRESULT get_BoundingRectangle(UiaRect *pRetVal) override
+    {
+        auto const& document = *this->document_tree_;
+        auto const& part_i = this->part_i;
+        auto const& content = document.parts[part_i].content;
+        auto const box = physical_screen_from_logical_window(
+            hwnd,
+            content.box);
+        pRetVal->left = box.min.x;
+        pRetVal->top = box.min.y;
+        pRetVal->width = box.max.x - box.min.x;
+        pRetVal->height = box.max.y - box.min.y;
+        return S_OK;
+    }
+
+    HRESULT get_FragmentRoot(IRawElementProviderFragmentRoot **pRetVal) override
+    {
+        auto other_part_i = /* root */0;
+        // TODO(nil): @copypasta
+        auto provider = new DocumentPartProvider();
+        provider->hwnd = this->hwnd;
+        provider->document_tree_ = this->document_tree_;
+        provider->part_i = other_part_i;
+        provider->AddRef();
+        *pRetVal = provider;
+        return S_OK;
+    }
 
     // IRawElementProviderFragmentRoot:
     HRESULT ElementProviderFromPoint(double x, double y,
-                                     IRawElementProviderFragment **pRetVal);
-    HRESULT GetFocus(IRawElementProviderFragment **pRetVal);
+                                     IRawElementProviderFragment **pRetVal)
+    {
+        // TODO(nil): implement collision detection
+        pRetVal = nullptr;
+        return S_OK;
+    }
 
+    HRESULT GetFocus(IRawElementProviderFragment **pRetVal)
+    {
+        // TODO(nil): implement focus
+        return S_OK;
+    }
 };
 
 static LRESULT UiAccessWindowProc(DocumentTree* document_,
@@ -350,6 +386,8 @@ static void demo_document_init(DocumentTree* document_tree_)
     // Add synthetic root at index 0
     ++document.parts_n;
     auto &root = document.parts[0];
+    root.content.text_utf8 = "demo_ui_access";
+    root.content.text_utf8_n = 15;
 
     // Add container
     {
