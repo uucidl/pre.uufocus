@@ -9,6 +9,8 @@
 #include <windows.h>
 #pragma comment(lib, "user32.lib")
 
+#include <cfloat>
+
 enum ReadingLayout
 {
     ReadingLayout_LeftToRight,
@@ -25,6 +27,14 @@ struct Float32Box2
 {
     Float32_2 min, max;
 };
+
+Float32Box2 box2_min_max_identity()
+{
+    Float32Box2 y;
+    y.min.x = y.min.y = FLT_MAX;
+    y.max.x = y.max.y = -FLT_MAX;
+    return y;
+}
 
 struct Content
 {
@@ -74,6 +84,16 @@ static Float32Box2 physical_screen_from_logical_window(HWND hwnd,
     return {
         { (float)points[0].x, (float)points[0].y },
         { (float)points[1].x, (float)points[1].y }
+    };
+}
+
+static Float32_2 logical_point_from_physical_screen(HWND hwnd, Float32_2 point)
+{
+    POINT p = { (LONG) point.x, (LONG) point.y };
+    MapWindowPoints(HWND_DESKTOP, hwnd, &p, 1);
+    return {
+        (float) p.x,
+        (float) p.y
     };
 }
 
@@ -336,8 +356,31 @@ struct DocumentPartProvider
     HRESULT ElementProviderFromPoint(double x, double y,
                                      IRawElementProviderFragment **pRetVal)
     {
-        // TODO(nil): implement collision detection
-        pRetVal = nullptr;
+        auto const point = logical_point_from_physical_screen(
+            this->hwnd,
+            { (float)x, (float)y });
+        auto const& document = *document_tree_;
+        Float32Box2 smallest_box = box2_min_max_identity();
+        int smallest_part_i = 0;
+
+        // TODO(nil): disambiguates multiple colliding regions
+        for (int part_i = 0; part_i < document.parts_n; ++part_i) {
+            auto const &content = document.parts[part_i].content;
+            if (point.x < content.box.min.x) continue;
+            if (point.x > content.box.max.x) continue;
+            if (point.y < content.box.min.y) continue;
+            if (point.y > content.box.max.y) continue;
+            smallest_part_i = part_i;
+        }
+
+        auto other_part_i = smallest_part_i;
+        // TODO(nil): @copypasta
+        auto provider = new DocumentPartProvider();
+        provider->hwnd = this->hwnd;
+        provider->document_tree_ = this->document_tree_;
+        provider->part_i = other_part_i;
+        provider->AddRef();
+        *pRetVal = provider;
         return S_OK;
     }
 
