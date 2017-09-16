@@ -1,6 +1,12 @@
 // accessibility
 
-// TODO(nicolas): fire AutomationFocusChangedEvent
+// TODO(nil): make text discoverable
+//
+// Example of text from a web page that the narrator can deal with
+//
+// ControlType: UIA_EditControlTypeId
+// IsEnabled: true
+// IsValuePatternAvailable: true
 
 #if defined(WIN32_UI_ACCESS_MAIN)
 
@@ -12,6 +18,7 @@
 #pragma comment(lib, "user32.lib")
 
 #include <cfloat>
+#include <cstdint>
 
 enum ReadingLayout
 {
@@ -52,10 +59,13 @@ struct DocumentPart
     int children_index_first;
     int children_index_last;
     Content content;
+    // stable id representing the part regardless of its localized content
+    uint64_t part_id;
 };
 
 struct DocumentTree
 {
+    Float32Box2 window_with_decoration;
     enum { MAX_PART_N = 64 };
     DocumentPart parts[MAX_PART_N];
     int parts_n;
@@ -134,6 +144,28 @@ static void to_BSTR_from_small(char const* utf8, int utf8_n, VARIANT* d_)
     d.bstrVal = bstr;
 }
 
+static void to_BSTR_hex_from_uint64(uint64_t x, VARIANT* d_)
+{
+    static constexpr auto MAX_HEX_DIGITS = 64/4;
+    wchar_t hex[MAX_HEX_DIGITS + 1];
+    auto hex_l = hex;
+    for (int nibble_i = MAX_HEX_DIGITS; nibble_i; --nibble_i) {
+        const auto nibble = (x >> 4*(nibble_i - 1)) & 0xF;
+        if (nibble < 10) {
+            *hex_l = L'0' + char(nibble);
+        } else {
+            *hex_l = L'a' + char(nibble - 10);
+        }
+        ++hex_l;
+    }
+    auto bstr = SysAllocStringLen(hex, (UINT)(hex_l - hex));
+
+    auto &d = *d_;
+    d.vt = VT_BSTR;
+    d.bstrVal = bstr;
+}
+
+
 // Glue between document & Uia
 struct DocumentPartProvider
 : public IRawElementProviderSimple
@@ -210,16 +242,45 @@ struct DocumentPartProvider
         auto const& content = document.parts[part_i].content;
         switch (propertyId)
         {
+            case UIA_AutomationIdPropertyId: {
+                if (document.parts[part_i].part_id) {
+                    to_BSTR_hex_from_uint64(document.parts[part_i].part_id, &result);
+                }
+            } break;
+
             case UIA_BoundingRectanglePropertyId: {
-                auto const box = physical_screen_from_logical_window(
-                    hwnd,
-                    content.box);
-                to_VT_R8_ARRAY(box, &result);
+                if (part_i != 0) {
+                    auto const box = physical_screen_from_logical_window(
+                        hwnd,
+                        content.box);
+                    to_VT_R8_ARRAY(box, &result);
+                }
+            } break;
+
+            case UIA_HasKeyboardFocusPropertyId: {
+                if (part_i != 0) {
+                    result.vt = VT_BOOL;
+                    result.boolVal = document.active_part_i == part_i;
+                }
+            } break;
+
+            case UIA_IsKeyboardFocusablePropertyId: {
+                if (part_i != 0) {
+                    result.vt = VT_BOOL;
+                    result.boolVal = VARIANT_TRUE;
+                }
+            } break;
+
+            case UIA_IsEnabledPropertyId: {
+                result.vt = VT_BOOL;
+                result.boolVal = VARIANT_TRUE;
             } break;
 
             case UIA_NamePropertyId: {
-                to_BSTR_from_small(
-                    content.text_utf8, content.text_utf8_n, &result);
+                if (part_i != 0) {
+                    to_BSTR_from_small(
+                        content.text_utf8, content.text_utf8_n, &result);
+                }
             } break;
         }
         return S_OK;
@@ -323,19 +384,33 @@ struct DocumentPartProvider
 
     HRESULT SetFocus(void) override
     {
+        if (part_i == 0) return S_OK;
         auto &document = *this->document_tree_;
         document.active_part_i = this->part_i;
+        UiaRaiseAutomationEvent(this, UIA_AutomationFocusChangedEventId);
         return S_OK;
     }
 
     HRESULT get_BoundingRectangle(UiaRect *pRetVal) override
     {
+        if (part_i == 0)
+        {
+            *pRetVal = {};
+            return S_OK;
+        }
+
         auto const& document = *this->document_tree_;
         auto const& part_i = this->part_i;
         auto const& content = document.parts[part_i].content;
+
+        auto document_box = content.box;
+        if (part_i == 0) {
+            document_box = document.window_with_decoration;
+        }
+
         auto const box = physical_screen_from_logical_window(
             hwnd,
-            content.box);
+            document_box);
         pRetVal->left = box.min.x;
         pRetVal->top = box.min.y;
         pRetVal->width = box.max.x - box.min.x;
@@ -390,6 +465,10 @@ struct DocumentPartProvider
 
     HRESULT GetFocus(IRawElementProviderFragment **pRetVal)
     {
+        if (part_i == 0) {
+            *pRetVal = nullptr;
+            return S_OK;
+        }
         auto const& document = *this->document_tree_;
         auto other_part_i = document.active_part_i;
         // TODO(nil): @copypasta
@@ -443,6 +522,7 @@ static void demo_document_init(DocumentTree* document_tree_)
     auto &root = document.parts[0];
     root.content.text_utf8 = "demo_ui_access";
     root.content.text_utf8_n = 15;
+    root.part_id = 0xd385da7adf5672bc;
 
     // Add container
     {
@@ -453,8 +533,10 @@ static void demo_document_init(DocumentTree* document_tree_)
         auto child1_part_i = document.parts_n++;
         auto child2_part_i = document.parts_n++;
 
-        document.parts[part_i].children_index_first = child1_part_i;
-        document.parts[part_i].children_index_last = child2_part_i + 1;
+        auto &container_part = document.parts[part_i];
+        container_part.part_id = 0xb714eb61b5681418;
+        container_part.children_index_first = child1_part_i;
+        container_part.children_index_last = child2_part_i + 1;
 
         auto& child1 = document.parts[child1_part_i].content;
         child1.text_utf8 = "Hello, world";
@@ -498,10 +580,11 @@ static void demo_document_layout(DocumentTree* document_tree_, Float32Box2 windo
 {
     DocumentTree& document = *document_tree_;
 
-    auto min_x = window_with_decoration.min.x;
-    auto min_y = window_with_decoration.min.y;
-    auto max_x = window_with_decoration.max.x;
-    auto max_y = window_with_decoration.max.y;
+    document.window_with_decoration = window_with_decoration;
+    auto min_x = window.min.x;
+    auto min_y = window.min.y;
+    auto max_x = window.max.x;
+    auto max_y = window.max.y;
 
     document_layout_horizontal_split(&document,
                                      0, 1,
