@@ -1,5 +1,7 @@
 // accessibility
 
+// TODO(nicolas): fire AutomationFocusChangedEvent
+
 #if defined(WIN32_UI_ACCESS_MAIN)
 
 // The document tree is meant to represent the UI's structure to assist
@@ -57,6 +59,7 @@ struct DocumentTree
     enum { MAX_PART_N = 64 };
     DocumentPart parts[MAX_PART_N];
     int parts_n;
+    int active_part_i;
 };
 
 #include <uiautomation.h>
@@ -320,7 +323,8 @@ struct DocumentPartProvider
 
     HRESULT SetFocus(void) override
     {
-        // TODO(nil): focus support
+        auto &document = *this->document_tree_;
+        document.active_part_i = this->part_i;
         return S_OK;
     }
 
@@ -386,7 +390,15 @@ struct DocumentPartProvider
 
     HRESULT GetFocus(IRawElementProviderFragment **pRetVal)
     {
-        // TODO(nil): implement focus
+        auto const& document = *this->document_tree_;
+        auto other_part_i = document.active_part_i;
+        // TODO(nil): @copypasta
+        auto provider = new DocumentPartProvider();
+        provider->hwnd = this->hwnd;
+        provider->document_tree_ = this->document_tree_;
+        provider->part_i = other_part_i;
+        provider->AddRef();
+        *pRetVal = provider;
         return S_OK;
     }
 };
@@ -482,14 +494,14 @@ static void document_layout_horizontal_split(DocumentTree* document_tree_,
     }
 }
 
-static void demo_document_layout(DocumentTree* document_tree_, int width, int height)
+static void demo_document_layout(DocumentTree* document_tree_, Float32Box2 window, Float32Box2 window_with_decoration)
 {
     DocumentTree& document = *document_tree_;
 
-    auto min_x = 0.0f;
-    auto min_y = 0.0f;
-    auto max_x = float(width);
-    auto max_y = float(height);
+    auto min_x = window_with_decoration.min.x;
+    auto min_y = window_with_decoration.min.y;
+    auto max_x = window_with_decoration.max.x;
+    auto max_y = window_with_decoration.max.y;
 
     document_layout_horizontal_split(&document,
                                      0, 1,
@@ -507,9 +519,21 @@ static LRESULT main_window_proc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         } break;
 
         case WM_SIZE: {
+            RECT window_rect;
+            GetWindowRect(hWnd, &window_rect);
+            MapWindowPoints(HWND_DESKTOP, hWnd, (LPPOINT)(&window_rect), 2);
             int width = (lParam>>0) & 0xffff;
             int height = (lParam>>16) & 0xffff;
-            demo_document_layout(&global_document, width, height);
+            Float32Box2 window_with_decorations = {
+                { (float)window_rect.left, (float)window_rect.top },
+                { (float)window_rect.right, (float)window_rect.bottom }
+            };
+            Float32Box2 window = {
+                { (float)0, (float)0 },
+                { (float)width, (float)height },
+            };
+
+            demo_document_layout(&global_document, window, window_with_decorations);
         } break;
     }
     return UiAccessWindowProc(&global_document, hWnd, uMsg, wParam, lParam);
@@ -522,6 +546,7 @@ _In_opt_ HINSTANCE hPI,
 _In_ char* lpCmdLine,
 _In_ int nCmdShow)
 {
+    // TODO(nicolas): did I forget CoInitialize?
     demo_document_init(&global_document);
     auto const application_name = L"demo_win32_ui_access";
     WNDCLASSEXW main_class = {};
@@ -530,7 +555,7 @@ _In_ int nCmdShow)
         d.cbSize = sizeof(d);
         d.style = CS_VREDRAW | CS_HREDRAW;
         d.lpfnWndProc = main_window_proc;
-        d.lpszClassName = L"uu_focus";
+        d.lpszClassName = L"demo_ui_access";
         d.hIcon = (HICON)LoadImageW(
             GetModuleHandle(nullptr),
             IDI_APPLICATION,
