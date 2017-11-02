@@ -1,6 +1,6 @@
 // accessibility
 
-// TODO(nil): make text discoverable
+// TODO(nil): make text discoverable by the windows narrator
 //
 // Example of text from a web page that the narrator can deal with
 //
