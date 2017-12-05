@@ -190,7 +190,7 @@ extern "C" int WINAPI WinMain(
     win32_wasapi_sound_open_stereo(&sound, 48000); // TODO(nicolas): how about opening/closing on demand
     if (sound.header.error == WasapiStreamError_Success)
     {
-        kernel32.CreateThread(
+        global_sound_thread = kernel32.CreateThread(
             /* thread attributes */nullptr,
             /* default stack size */0,
             audio_thread_main,
@@ -208,7 +208,10 @@ extern "C" int WINAPI WinMain(
     }
 
     global_sound_thread_must_quit = 1;
-    WaitForSingleObject(global_sound_thread, INFINITE);
+    if (WaitForSingleObject(global_sound_thread, INFINITE) != WAIT_OBJECT_0) {
+        error = kernel32.GetLastError();
+        return error;
+    }
     win32_wasapi_sound_close(&sound);
 
     win32_platform_shutdown(&global_platform);
