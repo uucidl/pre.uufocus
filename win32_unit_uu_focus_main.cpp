@@ -12,6 +12,9 @@ static const wchar_t* const global_application_name = L"UUFocus";
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
+#define UU_FOCUS_GLOBAL static
+#define UU_FOCUS_FN_STATE static
+
 #include "uu_focus_main.hpp"
 #include "uu_focus_effects.hpp"
 #include "uu_focus_effects_types.hpp"
@@ -52,25 +55,24 @@ static const wchar_t* const global_application_name = L"UUFocus";
 // @url: https://msdn.microsoft.com/en-us/library/windows/desktop/ee330740(v=vs.85).aspx
 
 static WIN32_WINDOW_PROC(main_window_proc);
-
-static kernel32 modules_kernel32;
-static user32 modules_user32;
-static shell32 modules_shell32;
-static comctl32 modules_comctl32;
-static gdi32 modules_gdi32;
-
-static UUFocusMainCoroutine global_uu_focus_main;
-static uint64_t global_qpf_hz;
-static uint64_t global_qpc_origin;
-
-static HANDLE global_sound_thread;
-static int32_t global_sound_thread_must_quit;
-static WasapiStream global_sound;
-
 static uint64_t now_micros();
 
-static ID2D1Factory *global_d2d1factory;
-static IDWriteFactory* global_dwritefactory;
+UU_FOCUS_GLOBAL kernel32 modules_kernel32;
+UU_FOCUS_GLOBAL user32 modules_user32;
+UU_FOCUS_GLOBAL shell32 modules_shell32;
+UU_FOCUS_GLOBAL comctl32 modules_comctl32;
+UU_FOCUS_GLOBAL gdi32 modules_gdi32;
+
+UU_FOCUS_GLOBAL UUFocusMainCoroutine global_uu_focus_main;
+UU_FOCUS_GLOBAL uint64_t global_qpf_hz;
+UU_FOCUS_GLOBAL uint64_t global_qpc_origin;
+
+UU_FOCUS_GLOBAL HANDLE global_sound_thread;
+UU_FOCUS_GLOBAL int32_t global_sound_thread_must_quit;
+UU_FOCUS_GLOBAL WasapiStream global_sound;
+
+UU_FOCUS_GLOBAL ID2D1Factory *global_d2d1factory;
+UU_FOCUS_GLOBAL IDWriteFactory* global_dwritefactory;
 
 #if UU_FOCUS_INTERNAL
 
@@ -78,9 +80,10 @@ extern size_t global_palettes_n;
 extern int global_palette_i;
 
 #include "uu_focus_ui.hpp"
-static win32_reloadable_modules::ReloadableModule global_ui_module;
+
+UU_FOCUS_GLOBAL win32_reloadable_modules::ReloadableModule global_ui_module;
 typedef UU_FOCUS_RENDER_UI_PROC(UUFocusRenderUIProc);
-static UUFocusRenderUIProc *global_uu_focus_ui_render;
+UU_FOCUS_GLOBAL UUFocusRenderUIProc *global_uu_focus_ui_render;
 #endif
 
 struct Platform {
@@ -239,7 +242,7 @@ struct Ui
 
 static WIN32_WINDOW_PROC(main_window_proc)
 {
-    static const UINT_PTR refresh_timer_id = 1;
+    UU_FOCUS_FN_STATE const UINT_PTR refresh_timer_id = 1;
 
     auto &main = global_uu_focus_main;
     auto const& user32 = modules_user32;
