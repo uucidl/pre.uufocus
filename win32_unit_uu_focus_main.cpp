@@ -238,11 +238,13 @@ static void d2d1_render(HWND hwnd, Ui*);
 struct Ui
 {
     double validity_ms; // time to live for the produced frame
+    uint64_t validity_end_micros;
 };
 
 static WIN32_WINDOW_PROC(main_window_proc)
 {
     UU_FOCUS_FN_STATE const UINT_PTR refresh_timer_id = 1;
+    UU_FOCUS_FN_STATE Ui ui;
 
     auto &main = global_uu_focus_main;
     auto const& user32 = modules_user32;
@@ -312,10 +314,10 @@ static WIN32_WINDOW_PROC(main_window_proc)
 #endif
 
         case WM_PAINT: {
-            Ui ui = {};
             ui.validity_ms = 1e6;
             d2d1_render(hWnd, &ui);
             ui.validity_ms = ui.validity_ms < 0.0? 0.0 : ui.validity_ms;
+            ui.validity_end_micros = now_micros() + uint64_t(1000*ui.validity_ms);
             if (refresh_timer_id != user32.SetTimer(hWnd, refresh_timer_id, UINT(ui.validity_ms), NULL)) {
               WIN32_ABORT("Could not SetTimer: %x", GetLastError());
             }
@@ -325,6 +327,9 @@ static WIN32_WINDOW_PROC(main_window_proc)
             uu_focus_main(&main);
             if (!timer_is_active(main.timer_effect)) {
                 user32.KillTimer(hWnd, refresh_timer_id);
+            }
+            if (now_micros() > ui.validity_end_micros) {
+                platform_render_async(&global_platform);
             }
         } break;
     }
