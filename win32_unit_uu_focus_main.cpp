@@ -351,7 +351,7 @@ static void welcome_render(ID2D1HwndRenderTarget* rt);
 static void internal_ui_render(ID2D1HwndRenderTarget* rt);
 #endif
 
-static struct {
+UU_FOCUS_GLOBAL struct {
     float bg_off[3];
     float bg_on[3];
 } global_palettes[] = {
@@ -372,8 +372,8 @@ static struct {
         { 182.0f/255.0f, 170.0f/255.0f, 154.0f/255.0f },
     },
 };
-size_t global_palettes_n = sizeof global_palettes / sizeof *global_palettes;
-int global_palette_i = 0;
+UU_FOCUS_GLOBAL size_t global_palettes_n = sizeof global_palettes / sizeof *global_palettes;
+UU_FOCUS_GLOBAL int global_palette_i = 0;
 
 static void win32_set_background(WNDCLASSEX* window_class_)
 {
@@ -387,13 +387,10 @@ static void win32_set_background(WNDCLASSEX* window_class_)
 
 static void d2d1_render(HWND hwnd, Ui* ui_)
 {
-    static int count = 0;
-    ++count; // paint once
-
-    static HWND global_hwnd;
-    static int global_client_width;
-    static int global_client_height;
-    static ID2D1HwndRenderTarget* global_render_target;
+    UU_FOCUS_FN_STATE HWND global_hwnd;
+    UU_FOCUS_FN_STATE int global_client_width;
+    UU_FOCUS_FN_STATE int global_client_height;
+    UU_FOCUS_FN_STATE ID2D1HwndRenderTarget* global_render_target;
 
     auto& ui = *ui_;
     auto const& user32 = modules_user32;
@@ -536,7 +533,7 @@ static char* string_push_double(char* dst_first,
 
 static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, char* text_last)
 {
-    static IDWriteTextFormat *global_text_format;
+    UU_FOCUS_FN_STATE IDWriteTextFormat *global_text_format;
     auto &dwrite = *global_dwritefactory;
     if (!global_text_format) {
         auto hr = dwrite.CreateTextFormat(
@@ -648,7 +645,7 @@ static void internal_ui_render(ID2D1HwndRenderTarget* rt_)
     text2_last = string_push_zstring(text2_last, text2_end, "Audio Mode: ");
     text2_last = string_push_i32(text2_last, text2_end, global_audio_mode, 2);
 
-    static IDWriteTextFormat *global_text_format;
+    UU_FOCUS_FN_STATE IDWriteTextFormat *global_text_format;
     auto &dwrite = *global_dwritefactory;
     float font_height_px = 17;
     if (!global_text_format) {
@@ -735,7 +732,7 @@ static void win32_notifyicon_make(NOTIFYICONDATA* nid_, Platform const& platform
 
 void platform_notify(Platform* _platform, UIText _text)
 {
-    static wchar_t content_memory[1024];
+    UU_FOCUS_FN_STATE wchar_t content_memory[1024];
     auto& platform = *_platform;
     auto& kernel32 = modules_kernel32;
     UITextValue text;
