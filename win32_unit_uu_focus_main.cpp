@@ -732,7 +732,7 @@ static void win32_notifyicon_make(NOTIFYICONDATA* nid_, Platform const& platform
 
 void platform_notify(Platform* _platform, UIText _text)
 {
-    UU_FOCUS_FN_STATE wchar_t content_memory[1024];
+    wchar_t content_memory[1024];
     auto& platform = *_platform;
     auto& kernel32 = modules_kernel32;
     UITextValue text;
