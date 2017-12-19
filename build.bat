@@ -58,16 +58,13 @@ if %ERRORLEVEL% neq 0 goto in_error_end
 echo PROGRAM	%BuildDir%\uu_focus_dev.exe
 
 cl -DUU_FOCUS_INTERNAL=0 -DWIN32_WASAPI_SOUND_INTERNAL=0 ^
-  -Fe%BuildDir%\uu_focus_release.exe win32_unit_uu_focus_main.cpp ^
+  -Fe%BuildDir%\uu_focus.exe win32_unit_uu_focus_main.cpp ^
   %BuildDir%\uu_focus.res ^
   -O2 -EHsc -Z7 -W3 -Fo%BuildObjDir%\ -nologo ^
-  -link -PDB:%BuildDir%\uu_focus_release.pdb
+  -link -PDB:%BuildDir%\uu_focus.pdb -pdbaltpath:%%_PDB%%
 if %ERRORLEVEL% neq 0 goto in_error_end
 
-mt.exe -nologo -manifest %BuildDir%\uu_focus_release.exe.manifest -outputresource:%BuildDir%\uu_focus_release.exe;1
-if %ERRORLEVEL% neq 0 goto in_error_end
-
-copy %BuildDir%\uu_focus_release.exe %BuildDir%\uu_focus.exe
+mt.exe -nologo -manifest %BuildDir%\uu_focus.exe.manifest -outputresource:%BuildDir%\uu_focus.exe;1
 if %ERRORLEVEL% neq 0 goto in_error_end
 echo PROGRAM	%BuildDir%\uu_focus.exe
 
