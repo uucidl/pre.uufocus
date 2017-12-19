@@ -55,6 +55,7 @@ cl -DUU_FOCUS_INTERNAL=1 ^
   -Od -EHsc -Z7 -W3 -Fo%BuildObjDir%\ -nologo ^
   -link -PDB:%BuildDir%\uu_focus_dev.pdb
 if %ERRORLEVEL% neq 0 goto in_error_end
+echo PROGRAM	%BuildDir%\uu_focus_dev.exe
 
 cl -DUU_FOCUS_INTERNAL=0 -DWIN32_WASAPI_SOUND_INTERNAL=0 ^
   -Fe%BuildDir%\uu_focus_release.exe win32_unit_uu_focus_main.cpp ^
@@ -68,6 +69,7 @@ if %ERRORLEVEL% neq 0 goto in_error_end
 
 copy %BuildDir%\uu_focus_release.exe %BuildDir%\uu_focus.exe
 if %ERRORLEVEL% neq 0 goto in_error_end
+echo PROGRAM	%BuildDir%\uu_focus.exe
 
 endlocal
 exit /b 0
