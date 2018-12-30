@@ -3,6 +3,8 @@ static char const* USAGE_PATTERN = "%s {--help,--quiet}";
 #include "uu_focus_main.hpp"
 
 #include <cassert>
+#include <cstring>
+#include <algorithm>
 #include <string>
 #include <vector>
 
