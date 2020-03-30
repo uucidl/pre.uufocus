@@ -50,6 +50,7 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
 
     CounterScope entry_counter(&program.entry_count);
     switch(/* resume */ program.step) {
+        // State automata mixed up with flow control:
         case 0:
 
         while(true) {

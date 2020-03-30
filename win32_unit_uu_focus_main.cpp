@@ -194,7 +194,8 @@ extern "C" int WINAPI WinMain(
     modules_comctl32 = LoadComctl32(kernel32);
 
     auto& sound = global_sound;
-    win32_wasapi_sound_open_stereo(&sound, 48000); // TODO(nicolas): how about opening/closing on demand
+    // NOTE(nicolas): dependency between the pink noise filter and 44.1khz
+    win32_wasapi_sound_open_stereo(&sound, 44100); // TODO(nicolas): how about opening/closing on demand
     if (sound.header.error == WasapiStreamError_Success)
     {
         global_sound_thread = kernel32.CreateThread(
