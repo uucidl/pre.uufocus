@@ -8,6 +8,10 @@ struct TimerEffect
     uint64_t now_micros;
     uint64_t end_micros;
     Platform* platform;
+    struct {
+        int hours;
+        int minutes;
+    } start_time;
 };
 
 

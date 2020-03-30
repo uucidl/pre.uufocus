@@ -349,8 +349,10 @@ static WIN32_WINDOW_PROC(main_window_proc)
 }
 
 struct Ui;
-static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt, Ui*);
 static void welcome_render(ID2D1HwndRenderTarget* rt);
+static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt, Ui*);
+static void timer_end_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, Ui* ui_);
+
 #if UU_FOCUS_INTERNAL
 static void internal_ui_render(ID2D1HwndRenderTarget* rt);
 #endif
@@ -431,8 +433,11 @@ static void d2d1_render(HWND hwnd, Ui* ui_)
     if (!timer_is_active(main.timer_effect)) {
         auto bg_color = global_palettes[palette_i].bg_off;
         rt.Clear(D2D1::ColorF(bg_color[0], bg_color[1], bg_color[2], 1.0f));
-        welcome_render(&rt);
-
+        if (main.timer_effect->start_time.hours == 0 && main.timer_effect->start_time.minutes == 0) {
+          welcome_render(&rt);
+        } else {
+          timer_end_render(*main.timer_effect, &rt, ui_);
+        }
     } else /* timer is active */ {
         auto bg_color = global_palettes[palette_i].bg_on;
         rt.Clear(D2D1::ColorF(bg_color[0], bg_color[1], bg_color[2], 1.0f));
@@ -535,6 +540,9 @@ static char* string_push_double(char* dst_first,
     return dst_first + res;
 }
 
+static constexpr const auto global_ui_welcome_string = "Press LMB to start timer.";
+
+
 static void centered_text_render(ID2D1HwndRenderTarget* _rt, char* text_first, char* text_last)
 {
     UU_FOCUS_FN_STATE IDWriteTextFormat *global_text_format;
@@ -586,11 +594,35 @@ static void welcome_render(ID2D1HwndRenderTarget* _rt)
 {
     enum { MAX_TEXT_SIZE = 100 };
     char text[MAX_TEXT_SIZE];
-    auto const text_e = text + MAX_TEXT_SIZE;
-    auto text_l = text;
-    text_l = string_push_zstring(
-        text_l, text_e, "Press LMB to start timer.");
-    centered_text_render(_rt, text, text_l);
+    auto const text_end = text + MAX_TEXT_SIZE;
+    auto text_last = text;
+    text_last = string_push_zstring(
+        text_last, text_end, global_ui_welcome_string);
+    centered_text_render(_rt, text, text_last);
+}
+
+static void timer_end_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, Ui* ui_)
+{
+    enum { MAX_TEXT_SIZE = 100 };
+    char text[MAX_TEXT_SIZE];
+    auto text_end = text + MAX_TEXT_SIZE;
+    auto text_last = text;
+
+    text_last = string_push_zstring(
+        text_last, text_end, global_ui_welcome_string);
+
+    /* tell when the last cycle started */ {
+      auto rc = text_last;
+      auto const rl = text_end;
+      rc = string_push_zstring(rc, rl, "\nLast cycle started at ");
+      rc = string_push_i32(rc, rl, timer.start_time.hours, 2);
+      rc = string_push_n(rc, rl, ":", 1);
+      rc = string_push_i32(rc, rl, timer.start_time.minutes, 2);
+      rc = string_push_zstring(rc, rl, ".");
+
+      text_last = rc;
+    }
+    centered_text_render(rt_, text, text_last);
 }
 
 static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, Ui* ui_)
@@ -625,7 +657,19 @@ static void timer_render(TimerEffect const& timer, ID2D1HwndRenderTarget* rt_, U
     }
     text_last = string_push_zstring(
         text_last, text_end,
-        "\npress RMB to stop, LMB to reset.");
+        "\nPress RMB to stop, LMB to reset.");
+
+    /* tell when the cycle started */ {
+      auto rc = text_last;
+      auto const rl = text_end;
+      rc = string_push_zstring(rc, rl, "\nCycle started at ");
+      rc = string_push_i32(rc, rl, timer.start_time.hours, 2);
+      rc = string_push_n(rc, rl, ":", 1);
+      rc = string_push_i32(rc, rl, timer.start_time.minutes, 2);
+      rc = string_push_zstring(rc, rl, ".");
+
+      text_last = rc;
+    }
 
     centered_text_render(rt_, text, text_last);
 }
@@ -780,6 +824,17 @@ void platform_notify(Platform* _platform, UIText _text)
     }
 #endif
 }
+
+Civil_Time_Of_Day platform_get_time_of_day()
+{
+  SYSTEMTIME win32_time;
+  modules_kernel32.GetLocalTime(&win32_time);
+  Civil_Time_Of_Day time = {};
+  time.hh = win32_time.wHour;
+  time.mm = win32_time.wMinute;
+  return time;
+}
+
 
 static void win32_platform_init(struct Platform* platform_, HWND hWnd)
 {

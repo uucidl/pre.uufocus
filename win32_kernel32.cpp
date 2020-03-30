@@ -14,6 +14,7 @@ kernel32 LoadKernel32()
     result.QueryPerformanceCounter = ::QueryPerformanceCounter;
     result.QueryPerformanceFrequency = ::QueryPerformanceFrequency;
     result.SetEvent = ::SetEvent;
+    result.GetLocalTime = ::GetLocalTime;
     return result;
 }
 

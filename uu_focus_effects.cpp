@@ -299,6 +299,11 @@ void timer_start(TimerEffect* _timer)
     auto& timer = *_timer;
     ++timer.on_count;
     timer_reset(&timer);
+
+    auto start_time = platform_get_time_of_day();
+    timer.start_time.hours = start_time.hh;
+    timer.start_time.minutes = start_time.mm;
+
     timer_update_and_render(&timer);
 }
 

@@ -8,10 +8,19 @@ struct UIText
     char data[16];
 };
 
+struct Civil_Time_Of_Day
+{
+  int hh;
+  int mm;
+};
+
 // Trigger a re-render asynchronously
 void platform_render_async(Platform*);
 
 // Notify user of an important status
 void platform_notify(Platform*, UIText content);
+
+// What is the current day's time of day?
+Civil_Time_Of_Day platform_get_time_of_day();
 
 UIText ui_text(char const* str);

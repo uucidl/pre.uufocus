@@ -18,6 +18,8 @@ struct kernel32
         _In_      DWORD                  dwCreationFlags,
         _Out_opt_ LPDWORD                lpThreadId);
 
+    void (WINAPI *GetLocalTime)( _Out_  LPSYSTEMTIME lpSystemTime);
+
     FARPROC
         (WINAPI *GetProcAddress)(
         _In_ HMODULE hModule,
