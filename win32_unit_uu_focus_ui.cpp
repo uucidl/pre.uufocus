@@ -1,3 +1,6 @@
+#define WINVER 0x0601
+#define _WIN32_WINNT 0x0601
+
 #include "uu_focus_ui.hpp"
 
 #include <D2d1.h>

@@ -6,6 +6,10 @@ static const wchar_t* const global_application_name = L"UUFocus";
 #define PLATFORM_NOTIFY_USE_MESSAGEBOX 0
 #define PLATFORM_NOTIFY_USE_NOTIFICATION_AREA 1
 
+//  Target Win7 and beyond.
+#define WINVER 0x0601
+#define _WIN32_WINNT 0x0601
+
 #define UNICODE 1
 #define _UNICODE 1
 #ifndef _CRT_SECURE_NO_WARNINGS
