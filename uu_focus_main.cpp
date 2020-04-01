@@ -65,7 +65,7 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
             audio_start(audio);
 
             set(&program, 20); case 20:
-            while (timer_is_active(timer)) {
+            while (timer_is_active(timer) && !timer_expired(timer)) {
                 auto const command = pop_command(&program);
                 if (command.type == Command_timer_stop) {
                     audio_stop(audio);

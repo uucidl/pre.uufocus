@@ -29,4 +29,5 @@ void timer_reset(TimerEffect*);
 bool timer_is_active(TimerEffect*);
 void timer_update_and_render(TimerEffect*);
 void timer_celebrate(TimerEffect*);
+bool timer_expired(TimerEffect*);
 

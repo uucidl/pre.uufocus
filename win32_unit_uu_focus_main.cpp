@@ -439,6 +439,9 @@ static void d2d1_render(HWND hwnd, Ui* ui_)
         } else {
           timer_end_render(*main.timer_effect, &rt, ui_);
         }
+    } else if (now_micros() > main.timer_effect->end_micros) {
+      ui.validity_ms = 0; // timer has just expired.. we will need to refresh the UI immediately.
+      // TODO(uucidl): find a better way to treat this case. For now I'd try to avoid the UI to just show that the timer has ended and never refresh..
     } else /* timer is active */ {
         auto bg_color = global_palettes[palette_i].bg_on;
         rt.Clear(D2D1::ColorF(bg_color[0], bg_color[1], bg_color[2], 1.0f));

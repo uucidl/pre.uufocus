@@ -316,8 +316,14 @@ void timer_stop(TimerEffect* _timer)
 
 bool timer_is_active(TimerEffect* _timer)
 {
-    auto& timer = *_timer;
-    return timer.on_count > 0 && timer.now_micros < timer.end_micros;
+    auto const& timer = *_timer;
+    return timer.on_count > 0;
+}
+
+bool timer_expired(TimerEffect* _timer)
+{
+    auto const& timer = *_timer;
+    return now_micros() >= timer.end_micros;
 }
 
 void timer_update_and_render(TimerEffect* _timer)

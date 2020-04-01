@@ -279,6 +279,11 @@ bool timer_is_active(TimerEffect* y)
     return y->on_count;
 }
 
+bool timer_expired(TimerEffect* y)
+{
+  return !y->on_count;
+}
+
 void timer_celebrate(TimerEffect* y)
 {
     effect_log(&y->actions, "timer celebrate");
