@@ -32,6 +32,7 @@ static const wchar_t* const global_application_name = L"UUFocus";
 #include <Commctrl.h>
 #pragma comment(linker, "/MANIFESTDEPENDENCY:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #include <Shellapi.h>
+#include <Shobjidl_core.h>
 
 #include "win32_wasapi_sound.hpp"
 #if UU_FOCUS_INTERNAL
@@ -51,6 +52,7 @@ static const wchar_t* const global_application_name = L"UUFocus";
 
 #include <dwrite.h>
 #pragma comment(lib, "dwrite.lib")
+
 
 // Taskbar:
 // @url: https://msdn.microsoft.com/en-us/library/windows/desktop/dd378460(v=vs.85).aspx
@@ -239,6 +241,8 @@ static uint64_t now_micros()
 
 struct Ui;
 static void d2d1_render(HWND hwnd, Ui*);
+static void taskbar_progress_render(HWND hWnd, Ui* ui_);
+
 
 struct Ui
 {
@@ -321,6 +325,7 @@ static WIN32_WINDOW_PROC(main_window_proc)
         case WM_PAINT: {
             ui.validity_ms = 1e6;
             d2d1_render(hWnd, &ui);
+            taskbar_progress_render(hWnd, &ui);
             ui.validity_ms = ui.validity_ms < 0.0? 0.0 : ui.validity_ms;
             ui.validity_end_micros = now_micros() + uint64_t(1000*ui.validity_ms);
             if (refresh_timer_id != user32.SetTimer(hWnd, refresh_timer_id, UINT(ui.validity_ms), NULL)) {
@@ -461,6 +466,32 @@ static void d2d1_render(HWND hwnd, Ui* ui_)
         global_render_target = nullptr;
         ui.validity_ms = 0;
     }
+}
+
+static void taskbar_progress_render(HWND hWnd, Ui* ui_)
+{
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  ITaskbarList3 *TaskbarList;
+  HRESULT hr = CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER, IID_ITaskbarList3, reinterpret_cast<void**>(&TaskbarList));
+  if (S_OK == hr) {
+    auto &main = global_uu_focus_main;
+    auto &timer = *main.timer_effect;
+    if (!timer_is_active(&timer)) {
+      TaskbarList->SetProgressState(hWnd, TBPF_NOPROGRESS);
+    } else {
+      TaskbarList->SetProgressState(hWnd, TBPF_INDETERMINATE);
+
+      uint64_t now = now_micros();
+      if (timer.start_micros <= now && now < timer.end_micros) {
+        //uint64_t end_from_now_micros = timer.end_micros - now_micros();
+        uint64_t total_micros = timer.end_micros - timer.start_micros;
+        uint64_t elapsed_micros = now_micros() - timer.start_micros;
+        TaskbarList->SetProgressState(hWnd, TBPF_NORMAL);
+        TaskbarList->SetProgressValue(hWnd, elapsed_micros, total_micros);
+      }
+    }
+  }
+  CoUninitialize();
 }
 
 static int digits_count(int32_t x)

@@ -304,6 +304,8 @@ void timer_start(TimerEffect* _timer)
     timer.start_time.hours = start_time.hh;
     timer.start_time.minutes = start_time.mm;
 
+    timer.start_micros = now_micros();
+
     timer_update_and_render(&timer);
 }
 

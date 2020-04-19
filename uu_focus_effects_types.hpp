@@ -8,7 +8,9 @@ struct TimerEffect
     uint64_t now_micros;
     uint64_t end_micros;
     Platform* platform;
+    uint64_t start_micros;
     struct {
+        // as civil time.
         int hours;
         int minutes;
     } start_time;
