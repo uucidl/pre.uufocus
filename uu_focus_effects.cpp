@@ -346,5 +346,8 @@ void timer_celebrate(TimerEffect* _timer)
     auto& timer = *_timer;
     timer.on_count = 0;
     timer_update_and_render(&timer);
-    platform_notify(timer.platform, ui_text("Focus time over! Congrats."));
+
+    const auto text = ui_text_temp("Focus time over! Congrats. (timer started at %02d:%02d)", timer.start_time.hours, timer.start_time.minutes);
+    platform_notify(timer.platform, text);
+    temp_allocator_reset();
 }

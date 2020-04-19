@@ -818,6 +818,7 @@ void platform_notify(Platform* _platform, UIText _text)
     wchar_t content_memory[1024];
     auto& platform = *_platform;
     auto& kernel32 = modules_kernel32;
+
     UITextValue text;
     memcpy(&text, &_text, sizeof text);
     auto content_first = content_memory;

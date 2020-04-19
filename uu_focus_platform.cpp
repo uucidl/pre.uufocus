@@ -2,18 +2,48 @@
 
 #include "uu_focus_platform_types.hpp"
 
-// TODO(nicolas): works only with literals for now
-UIText ui_text(char const* zstr)
+#include <stdarg.h>
+
+char temp_arena_bytes[4096];
+static size_t temp_arena_capacity = sizeof temp_arena_bytes;
+static size_t temp_arena_size;
+
+char* temp_allocator_zalloc(size_t size) {
+  if (size >= temp_arena_capacity - temp_arena_size) {
+    return 0;
+  }
+  char *ptr = &temp_arena_bytes[temp_arena_size];
+  temp_arena_size += size;
+  return ptr;
+}
+
+void temp_allocator_reset() {
+  temp_arena_size = 0;
+}
+
+
+UIText ui_text_temp(char const* fmt, ...)
 {
+    va_list args;
+    va_start(args, fmt);
+    size_t needed_bytes = ::vsnprintf(nullptr, 0, fmt, args);
+    va_end(args);
+    if (needed_bytes >= INT_MAX) {
+      return {};
+    }
+
+    size_t buffer_size = needed_bytes + 1;
+    auto buffer = temp_allocator_zalloc(buffer_size);
+    va_start(args, fmt);
+    ::vsnprintf(buffer, buffer_size, fmt, args);
+    va_end(args);
+
     UITextValue text;
-    text.ownership = UITextValue::MemoryOwnership_Borrowed;
-    text.utf8_data_first = zstr;
-    int n = 0;
-    while(*zstr++) ++n;
-    text.utf8_data_size = n;
+    text.ownership = UITextValue::MemoryOwnership_Temp;
+    text.utf8_data_first = &buffer[0];
+    text.utf8_data_size = int32_t(needed_bytes);
 
     UIText result;
     memcpy(&result, &text, sizeof text);
     return result;
 }
-
