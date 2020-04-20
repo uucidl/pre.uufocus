@@ -474,6 +474,8 @@ static void taskbar_progress_render(HWND hWnd, Ui* ui_)
   ITaskbarList3 *TaskbarList;
   HRESULT hr = CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER, IID_ITaskbarList3, reinterpret_cast<void**>(&TaskbarList));
   if (S_OK == hr) {
+    TaskbarList->HrInit();
+
     auto &main = global_uu_focus_main;
     auto &timer = *main.timer_effect;
     if (!timer_is_active(&timer)) {
