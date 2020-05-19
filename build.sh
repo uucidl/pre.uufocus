@@ -8,6 +8,7 @@ builds/test_uu_focus > /dev/null
 
 c++ -o builds/uu_focus_dev \
     -std=c++14 \
+    -mmacosx-version-min=10.11.6 \
     macos_unit_uu_focus_main.mm \
     -DUU_FOCUS_INTERNAL=1 \
     -g \
@@ -17,6 +18,7 @@ printf "PROGRAM\t%s\n" builds/uu_focus_dev
 
 c++ -o builds/uu_focus_release \
     -std=c++14 \
+    -mmacosx-version-min=10.11.6 \
     macos_unit_uu_focus_main.mm \
     -DUU_FOCUS_INTERNAL=0 \
     -g \
