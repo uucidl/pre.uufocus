@@ -33,8 +33,6 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
 
     auto timer = program.timer_effect;
     auto audio = program.audio_effect;
-    double const step_elapsed_micros =
-        double(program.input.time_micros - program.step_micros);
 
     if (program.input.command.type == Command_application_stop) {
         pop_command(&program);

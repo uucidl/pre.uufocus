@@ -14,6 +14,7 @@ BUILD(osx,"clang++ -std=c++11 cocoa.mm -o cocoa -framework AppKit")
 
 #include <mach/mach_time.h>
 
+#include <time.h>
 #include <cstdint>
 
 @interface UUContentView : NSView {}
@@ -208,6 +209,17 @@ static COREAUDIO_STREAM_RENDER(audio_render)
 {
   audio_thread_render(global_uu_focus_main.audio_effect, frames, frames_n);
   return CoreaudioStreamError_Success;
+}
+
+Civil_Time_Of_Day platform_get_time_of_day()
+{
+  struct tm lt = {};
+  const auto clock = time(nullptr);
+  localtime_r(&clock, &lt);
+  Civil_Time_Of_Day time = {};
+  time.hh = lt.tm_hour;
+  time.mm = lt.tm_min;
+  return time;
 }
 
 #include "uu_focus_effects.cpp"
