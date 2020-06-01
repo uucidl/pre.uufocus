@@ -346,7 +346,7 @@ static WIN32_WINDOW_PROC(main_window_proc)
 #if UU_FOCUS_INTERNAL
     if (win32_reloadable_modules::has_changed(&global_ui_module)) {
         auto reload_attempt = load(&global_ui_module);
-        address_assign(&global_uu_focus_ui_render, (HMODULE)global_ui_module.dll,
+        win32_proc_assign(&global_uu_focus_ui_render, (HMODULE)global_ui_module.dll,
                        "win32_uu_focus_ui_render");
         platform_render_async(&global_platform);
     }

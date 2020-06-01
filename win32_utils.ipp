@@ -2,7 +2,7 @@
 
 template <typename FnP>
 void
-address_assign(
+win32_proc_assign(
     FnP *dest, HMODULE hModule, char const* lpProcName)
 {
     auto const& kernel32 = modules_kernel32;

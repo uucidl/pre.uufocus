@@ -7,7 +7,7 @@ user32 LoadUser32(kernel32 const& kernel32)
     user32 result;
     auto m = kernel32.LoadLibraryA("user32.dll");
     if (m) {
-#define E(name_expr) address_assign(&result.name_expr, m, #name_expr)
+#define E(name_expr) win32_proc_assign(&result.name_expr, m, #name_expr)
         E(AdjustWindowRect);
         E(CreateWindowExW);
         E(DefWindowProcW);
