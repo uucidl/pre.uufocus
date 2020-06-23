@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdarg.h>
+
 struct Platform;
 
 // A piece of text content destined to the user
@@ -24,5 +26,6 @@ void platform_notify(Platform*, UIText content);
 Civil_Time_Of_Day platform_get_time_of_day();
 
 UIText ui_text_temp(char const* fmt, ...);
+UIText ui_text_tempv(char const* fmt, va_list args);
 
 void temp_allocator_reset();

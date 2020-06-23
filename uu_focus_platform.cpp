@@ -24,8 +24,17 @@ void temp_allocator_reset() {
 
 UIText ui_text_temp(char const* fmt, ...)
 {
+  va_list args;
+  va_start(args, fmt);
+  const auto result = ui_text_tempv(fmt, args);
+  va_end(args);
+  return result;
+}
+
+UIText ui_text_tempv(char const* fmt, va_list input_args)
+{
     va_list args;
-    va_start(args, fmt);
+    va_copy(args, input_args);
     size_t needed_bytes = ::vsnprintf(nullptr, 0, fmt, args);
     va_end(args);
     if (needed_bytes >= INT_MAX) {
@@ -34,7 +43,7 @@ UIText ui_text_temp(char const* fmt, ...)
 
     size_t buffer_size = needed_bytes + 1;
     auto buffer = temp_allocator_zalloc(buffer_size);
-    va_start(args, fmt);
+    va_copy(args, input_args);
     ::vsnprintf(buffer, buffer_size, fmt, args);
     va_end(args);
 
