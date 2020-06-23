@@ -156,8 +156,15 @@ static uint64_t now_micros()
   } else {
     [[NSColor blackColor] set];
     NSRectFill(dirtyRect);
-    auto string = @"Press LMB to start timer.";
-    [string drawInRect:[self frame] withAttributes: pTextAttributes];
+    auto const &timer = *global_uu_focus_main.timer_effect;
+    if (timer.start_time.hours == 0 && timer.start_time.minutes == 0) {
+      // @todo @bug what, I can't start working at midnight?
+      auto string = @"Press LMB to start timer.";
+      [string drawInRect:[self frame] withAttributes: pTextAttributes];
+    } else {
+      auto string = [NSString stringWithFormat: @"Press LMB to start timer.\nLast cycle started at %02d:%02d", timer.start_time.hours, timer.start_time.minutes];
+      [string drawInRect:[self frame] withAttributes: pTextAttributes];
+    }
   }
 }
 -(void)mouseDown:(NSEvent *)event
