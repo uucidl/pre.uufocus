@@ -12,6 +12,8 @@ c++ -o builds/uu_focus_dev \
     macos_unit_uu_focus_main.mm \
     -DUU_FOCUS_INTERNAL=1 \
     -g \
+    -fsanitize=undefined \
+    -fsanitize=address \
     -framework AppKit \
     -framework CoreAudio
 printf "PROGRAM\t%s\n" builds/uu_focus_dev

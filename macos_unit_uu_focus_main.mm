@@ -45,69 +45,75 @@ int main(int argc, char **argv)
   global_mach_absolute_time_origin = mach_absolute_time();
 
   [NSApplication sharedApplication];
-  [NSApp setActivationPolicy: NSApplicationActivationPolicyRegular];
-  auto const app_name = [[NSProcessInfo processInfo] processName];
-  DOC("create menubar") {
-    auto menubar = [[NSMenu new] autorelease];
-    auto menubar_app_item = [[NSMenuItem new] autorelease];
-    {
-      auto app_menu = [[NSMenu new] autorelease];
-      auto quit_title TAG(userstring) = [@"Quit " stringByAppendingString:app_name];
-      auto quit_item =
-        [[[NSMenuItem alloc]
-           initWithTitle: quit_title
-           action:@selector(terminate:)
-           keyEquivalent:@"q"]
-          autorelease];
-      [app_menu addItem: quit_item];
-      [menubar_app_item setSubmenu: app_menu];
-    }
-    [menubar addItem: menubar_app_item];
-    [NSApp setMainMenu: menubar];
-  }
+
   Platform platform = {};
-  DOC("create main window") {
-    auto window_style_mask = NSTitledWindowMask|
-      NSClosableWindowMask|
-      NSMiniaturizableWindowMask|
-      NSTexturedBackgroundWindowMask|
-      NSResizableWindowMask;
-    auto contentView = [[[UUContentView alloc]
-                          initWithFrame: NSMakeRect(0, 0, 640, 480)] autorelease];
-    auto window = [[[NSWindow alloc]
-                    initWithContentRect: [contentView frame]
-                              styleMask: window_style_mask
-                                backing: NSBackingStoreBuffered
-                                  defer: NO] autorelease];
-    [window cascadeTopLeftFromPoint: NSMakePoint(20, 20)];
-    [window setTitle: app_name];
-    [window setContentView: contentView];
-    // NOTE(nicolas): a key window is the one that receives input
-    // events; it also becomes our main window:
-    [window makeKeyAndOrderFront: nil];
-    platform.content_view = contentView;
-  }
 
-  global_uu_focus_main.timer_effect = timer_make(&platform);
+  @autoreleasepool {
+    [NSApp setActivationPolicy: NSApplicationActivationPolicyRegular];
+    auto const app_name = [[NSProcessInfo processInfo] processName];
+    DOC("create menubar") {
+      auto menubar = [[NSMenu new] autorelease];
+      auto menubar_app_item = [[NSMenuItem new] autorelease];
+      {
+        auto app_menu = [[NSMenu new] autorelease];
+        auto quit_title TAG(userstring) = [@"Quit " stringByAppendingString:app_name];
+        auto quit_item =
+          [[[NSMenuItem alloc]
+             initWithTitle: quit_title
+                    action:@selector(terminate:)
+             keyEquivalent:@"q"]
+            autorelease];
+        [app_menu addItem: quit_item];
+        [menubar_app_item setSubmenu: app_menu];
+      }
+      [menubar addItem: menubar_app_item];
+      [NSApp setMainMenu: menubar];
+    }
+    DOC("create main window") {
+      auto window_style_mask = NSTitledWindowMask|
+        NSClosableWindowMask|
+        NSMiniaturizableWindowMask|
+        NSTexturedBackgroundWindowMask|
+        NSResizableWindowMask;
+      auto contentView = [[[UUContentView alloc]
+                            initWithFrame: NSMakeRect(0, 0, 640, 480)] autorelease];
+      auto window = [[[NSWindow alloc]
+                       initWithContentRect: [contentView frame]
+                                 styleMask: window_style_mask
+                                   backing: NSBackingStoreBuffered
+                                     defer: NO] autorelease];
+      [window cascadeTopLeftFromPoint: NSMakePoint(20, 20)];
+      [window setTitle: app_name];
+      [window setContentView: contentView];
+      // NOTE(nicolas): a key window is the one that receives input
+      // events; it also becomes our main window:
+      [window makeKeyAndOrderFront: nil];
 
-  auto timerCallback = [[UUTimerProxy alloc] autorelease];
-  [NSApp activateIgnoringOtherApps: YES];
+      platform.content_view = [contentView retain];
+    }
 
-  DOC("schedule time evaluation") {
-    auto nstimer = [[NSTimer
-                     timerWithTimeInterval: 0.200
-                                    target:timerCallback
-                                  selector:@selector(onTimer)
-                                  userInfo: nil
-                                   repeats: YES] autorelease];
-    [[NSRunLoop currentRunLoop] addTimer: nstimer forMode: NSRunLoopCommonModes];
-  }
+    global_uu_focus_main.timer_effect = timer_make(&platform);
 
-  coreaudio_stream.header.input_render = audio_render;
-  
-  if (macos_coreaudio_open_stereo(&coreaudio_stream, 48000)) {
-    return 0x476142b8; // "could not open audio stream"
-  }
+    auto timerCallback = [[UUTimerProxy alloc] autorelease];
+    [NSApp activateIgnoringOtherApps: YES];
+
+    DOC("schedule time evaluation") {
+      auto nstimer = [[NSTimer
+                        timerWithTimeInterval: 0.200
+                                       target:timerCallback
+                                     selector:@selector(onTimer)
+                                     userInfo: nil
+                                      repeats: YES] autorelease];
+      [[NSRunLoop currentRunLoop] addTimer: nstimer forMode: NSRunLoopCommonModes];
+    }
+
+    coreaudio_stream.header.input_render = audio_render;
+
+    if (macos_coreaudio_open_stereo(&coreaudio_stream, 48000)) {
+      return 0x476142b8; // "could not open audio stream"
+    }
+  } // autoreleasepool
+
   [NSApp run];
   macos_coreaudio_close(&coreaudio_stream);
   return 0;
@@ -144,8 +150,8 @@ static uint64_t now_micros()
     auto minutes = timer_countdown_s/60;
     auto seconds = timer_countdown_s - minutes*60;
 
-    auto string = [[NSString stringWithFormat:@"%02d:%02d",
-                             minutes, seconds] autorelease];
+    auto string = [NSString stringWithFormat:@"%02d:%02d",
+                            minutes, seconds];
     [string drawInRect:[self frame] withAttributes: pTextAttributes];
   } else {
     [[NSColor blackColor] set];
@@ -166,14 +172,16 @@ static uint64_t now_micros()
 @implementation UUTimerProxy
 -(void)onTimer
 {
-  auto &main = global_uu_focus_main;
-  auto &input = main.input;
-  main.input = {};
+  @autoreleasepool {
+    auto &main = global_uu_focus_main;
+    auto &input = main.input;
+    main.input = {};
 
-  main.input.time_micros = now_micros();
+    main.input.time_micros = now_micros();
 
-  main.timer_effect->now_micros = main.input.time_micros;
-  uu_focus_main(&global_uu_focus_main);
+    main.timer_effect->now_micros = main.input.time_micros;
+    uu_focus_main(&global_uu_focus_main);
+  }
 }
 @end
 
