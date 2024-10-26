@@ -17,24 +17,6 @@ def get_own_argv():
     return argv[argv.index("--") + 1:]
 
 
-@contextlib.contextmanager
-def fully_redirect_stdout(output):
-    stdout = sys.stdout
-    stdout_fd = stdout.fileno()
-    # copy stdout_fd before it is overwritten
-    #NOTE: `copied` is inheritable on Windows when duplicating a standard stream
-    with os.fdopen(os.dup(stdout_fd), 'wb') as copied:
-        stdout.flush()  # flush library buffers that dup2 knows nothing about
-        os.dup2(output.fileno(), stdout_fd)
-        try:
-            yield stdout # allow code to be run with the redirected stdout
-        finally:
-            # restore stdout to its previous value
-            #NOTE: dup2 makes stdout_fd inheritable unconditionally
-            stdout.flush()
-            os.dup2(copied.fileno(), stdout_fd)  # $ exec >&copied
-
-
 def win32_save_icons(output_dir):
     with open(os.path.join(output_dir, 'blender_render.log'), 'w') as logfile:
         for scene in bpy.data.scenes:
@@ -44,14 +26,14 @@ def win32_save_icons(output_dir):
                 attrs = dict(
                  resolution_x = resolution,
                     resolution_y = resolution,
-                    resolution_percentage = 100.0,
+                    resolution_percentage = 100,
                     use_file_extension = True,
                     filepath=filepath
                 )
                 saved_attrs = { a: getattr(scene.render, a) for a in attrs.keys() }
                 try:
                     for a, value in attrs.items(): setattr(scene.render, a, value)
-                    with fully_redirect_stdout(logfile):
+                    with contextlib.redirect_stdout(logfile):
                         print("Rendering it")
                         bpy.ops.render.render(animation=False, write_still=True, use_viewport=False, layer="", scene=scene.name)
                     yield attrs['filepath']
@@ -86,8 +68,17 @@ def main():
         parser.print_help()
         return
 
-    bpy.context.user_preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
-    bpy.context.user_preferences.addons['cycles'].preferences.devices[0].use = True
+    bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
+    # Set the device and feature set
+    bpy.context.scene.cycles.device = "GPU"
+
+    # get_devices() to let Blender detects GPU device
+    bpy.context.preferences.addons["cycles"].preferences.get_devices()
+    print(bpy.context.preferences.addons["cycles"].preferences.compute_device_type)
+    for d in bpy.context.preferences.addons["cycles"].preferences.devices:
+        d["use"] = 1 # Using all devices, include GPU and CPU
+        print(d["name"], d["use"])
+
     for output_filepath in win32_save_icons(args.output_dir):
         print("IMAGE\t%s" % output_filepath)
 
