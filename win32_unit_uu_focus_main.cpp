@@ -147,11 +147,6 @@ extern "C" int WINAPI WinMain(
         if (S_OK != hr) return 0xf1'13'7b'ad; // "failed to obtain IUIAutomation"
     }
 
-    auto &d2d1factory = *global_d2d1factory;
-    FLOAT dpi_x;
-    FLOAT dpi_y;
-    d2d1factory.GetDesktopDpi(&dpi_x, &dpi_y);
-
     auto const user32 = LoadUser32(kernel32);
     modules_user32 = user32;
     auto const gdi32 = LoadGdi32(kernel32);
