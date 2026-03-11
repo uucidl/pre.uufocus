@@ -19,6 +19,11 @@ struct AudioEffect
     std::vector<std::string> actions;
 };
 
+struct JournalEffect
+{    
+    std::vector<std::string> actions;
+};
+
 struct Scenario
 {
     Scenario(std::string name) {
@@ -203,12 +208,14 @@ int main(int argc, char** argv)
         Scenario _("timer celebrates once done");
         TimerEffect timer;
         AudioEffect audio;
+        JournalEffect database;
         UUFocusMainCoroutine program;
         enum { TIMER_ELAPSED_START = 31 };
         {
             program = {};
             program.timer_effect = &timer;
             program.audio_effect = &audio;
+            program.database_effect = &database;
             program.timer_elapsed_n = TIMER_ELAPSED_START;
         }
 
@@ -221,6 +228,8 @@ int main(int argc, char** argv)
 
         assert(1 == count_range(timer.actions, "timer celebrate"));
         assert(program.timer_elapsed_n == TIMER_ELAPSED_START + 1);
+
+        assert(1 == count_range(database.actions, "database record completed timer"));
     }
 }
 
@@ -294,3 +303,7 @@ void timer_reset(TimerEffect* y)
     effect_log(&y->actions, "timer reset");
 }
 
+void journal_record_completed_timer(JournalEffect * y)
+{
+    effect_log(&y->actions, "database record completed timer");
+}

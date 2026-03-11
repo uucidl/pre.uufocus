@@ -340,3 +340,13 @@ void timer_celebrate(TimerEffect* _timer)
     timer_update_and_render(&timer);
     platform_notify(timer.platform, ui_text("Focus time over! Congrats."));
 }
+
+JournalEffect * journal_make(Platform*)
+{
+    return nullptr;
+}
+
+void journal_record_completed_timer(JournalEffect*)
+{
+    printf("completed a timer\n");
+}

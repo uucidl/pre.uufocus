@@ -33,6 +33,8 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
 
     auto timer = program.timer_effect;
     auto audio = program.audio_effect;
+    auto database = program.database_effect;
+
     double const step_elapsed_micros =
         double(program.input.time_micros - program.step_micros);
 
@@ -81,6 +83,7 @@ CoroutineState uu_focus_main(UUFocusMainCoroutine* _program)
             }
             ++program.timer_elapsed_n;
             timer_celebrate(timer);
+            journal_record_completed_timer(database);
             audio_stop(audio);
             timer_update_and_render(timer);
         }

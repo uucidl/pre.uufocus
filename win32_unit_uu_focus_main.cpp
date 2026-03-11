@@ -363,9 +363,10 @@ static WIN32_WINDOW_PROC(child_window_proc)
         case WM_CREATE: {
             auto &main_state = global_uu_focus_main;
             main_state.timer_effect = timer_make(&global_platform);
+            main_state.database_effect = journal_make(&global_platform);
             main_state.input.command = {};
             main_state.input.time_micros = now_micros();
-
+            
             uu_focus_main(&main_state);
 
 #if UU_FOCUS_INTERNAL

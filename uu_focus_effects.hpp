@@ -21,12 +21,19 @@ void audio_thread_render(AudioEffect*, float* stereo_frames, int frame_count);
 
 struct TimerEffect;
 TimerEffect* timer_make(Platform* platform);
-void timer_destroy(TimerEffect*);
 
 void timer_start(TimerEffect*);
 void timer_stop(TimerEffect*);
 void timer_reset(TimerEffect*);
 bool timer_is_active(TimerEffect*);
 void timer_update_and_render(TimerEffect*);
+
+// sends some kind of notification to the user
 void timer_celebrate(TimerEffect*);
+
+struct JournalEffect;
+JournalEffect * journal_make(Platform*);
+
+// persists that a timer was completed.
+void journal_record_completed_timer(JournalEffect*);
 
