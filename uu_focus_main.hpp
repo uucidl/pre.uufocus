@@ -43,6 +43,7 @@ struct UUFocusMainCoroutine
     // effects:
     struct AudioEffect *audio_effect;
     struct TimerEffect *timer_effect;
+    struct JournalEffect *database_effect;
 
     // internal state:
     int entry_count;
