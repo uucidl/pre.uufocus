@@ -51,7 +51,7 @@ int main(int argc, char const ** argv)
     if (input_file_n == 0) return usage_error("inputfile: need at least one.\n");
 
     auto output = win32icon_new();
-    /* append images */ for (int i = 0; i != input_file_n; ++i) {
+    /* append images */ for (size_t i = 0; i != input_file_n; ++i) {
         auto const filename = input_file_f[i];
         int size_x, size_y;
         auto data8 = stbi_load(filename, &size_x, &size_y, NULL, 4);
@@ -149,8 +149,8 @@ template <typename T>
 void push_back(std::vector<uint8_t>* memory_, T x)
 {
     auto& memory = *memory_;
-    auto region = allocate_region(&memory, memory.size(), sizeof T);
-    memcpy(region.bytes_f, &x, sizeof T);
+    auto region = allocate_region(&memory, memory.size(), sizeof (T));
+    memcpy(region.bytes_f, &x, sizeof (T));
 }
 
 // structures for the ICO file format:
@@ -283,7 +283,7 @@ static void win32icon_add_image8(Win32Icon* icon_, stbi_uc* data8, int size_x, i
             auto d_row_region = allocate_region(&icon.data, icon.data.size(), row_byte_size);
             auto d_byte = d_row_region.bytes_f;
             auto s_byte = data8 + input_row_offset;
-            for (int x = 0; x < header.size_x; ++x) {
+            for (size_t x = 0; x < header.size_x; ++x) {
                 /* bgr <- rgb */ for (auto comp = 3; comp--; ) {
                     *d_byte = s_byte[comp];
                     ++d_byte;

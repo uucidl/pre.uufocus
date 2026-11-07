@@ -1,5 +1,7 @@
 #include "uu_focus_platform.hpp"
 
+#include <stdint.h>
+
 #include "uu_focus_platform_types.hpp"
 
 // TODO(nicolas): works only with literals for now
@@ -16,4 +18,3 @@ UIText ui_text(char const* zstr)
     memcpy(&result, &text, sizeof text);
     return result;
 }
-
